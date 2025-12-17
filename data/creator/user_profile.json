@@ -1,0 +1,12 @@
+{
+  "name": "Zino",
+  "refer_title": "Creator",
+  "nickname": "Zi",
+  "status": "Creator",
+
+  "relationship": {
+    "trust_level": 0.1,
+    "affinity": 1.0,
+    "lore_tag": "The one who created Kitsu."
+  }
+} 

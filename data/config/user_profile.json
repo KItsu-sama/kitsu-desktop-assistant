@@ -1,0 +1,18 @@
+{
+  "name": "",
+  "nickname": "",
+  "refer_title": "",
+  "gender": "unknown",
+  "status": "user",
+  "relationship": {
+    "trust_level": 0.5,
+    "affinity": 0.5,
+    "lore_tag": "stranger"
+  },
+  "permissions": {
+    "admin": false,
+    "dev_console": false,
+    "memory_clear": true,
+    "state_change": true
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "is_admin": true,
+    "can_shutdown": true,
+    "can_edit_memory": true,
+    "can_trigger_modes": true,
+    "can_toggle_avatar": true
+  }
+}

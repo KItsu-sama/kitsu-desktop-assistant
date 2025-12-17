@@ -1,0 +1,620 @@
+kitsu/
+│
+├── main.py                          # 🚀 Entry point - minimal, just bootstraps
+├── launcher.py                      # 🎬 Handles initialization, config loading
+├── requirements.txt                 # 📦 Python dependencies
+├── pyproject.toml                   # 🔧 Modern Python project config
+├── README.md                        # 📖 User-facing documentation
+├── CONTRIBUTING.md                  # 🤝 For community contributors
+├── .env.example                     # 🔐 Template for secrets
+│
+├── /core/                                   # 🧠 Kitsu's Brain (Pure Logic)
+│   ├── __init__.py
+│   ├──  kitsu_core.py                         # Orchestrator: routes input → NLP / emotion / intent  →  META-CONTROLLER  👑  →   planner / memory / reflection (conditional)  →  LLM
+│   ├──  fallback_manager.py                   # Safety fallback responses
+│   │
+│   │   # 🛠 DEV-ONLY TOOLS (not for user)  
+│   │ #=============================================================#=============================================================#
+│   │
+│   ├── /response_manager/           # Dev tools for response tuning
+│   │   ├── history.py
+│   │   ├── overrides.py
+│   │   └── exporter.py
+│   │
+│   ├── 📁 dev/                     # 🛠 ALL dev tools here
+│   │   ├── console_router.py        
+│   │   ├── permissions.py           
+│   │   └── 📁 handlers/
+│   │       ├── command_registry.py      # Command registration
+│   │       ├── response_trainer.py  
+│   │       ├── response_rater.py    
+│   │       ├── error_viewer.py      
+│   │       ├── stats_viewer.py      
+│   │       ├── module_resetter.py   
+│   │       └── debug_tools.py       
+│   │
+│   │ #=============================================================#=============================================================#
+│   │
+│   ├──/onboarding/                          # 🎉 First-time experience
+│   │   ├── __init__.py
+│   │   ├── onboarding_flow.py                # Full onboarding logic
+│   │   ├── onboarding_ascii.py               # ASCII onboarding UI
+│   │   ├── onboarding_voice.py               # TTS version of onboarding
+│   │   └── help_panel.py                     # Scrollable categorized help menu
+│   │
+│   │
+│   ├── /personality/                         # 🦊 Identity & Personality Engine
+│   │   ├── __init__.py
+│   │   ├── self_model.py
+│   │   ├── emotion_engine.py
+│   │   ├── mood_tracker.py
+│   │   ├── behavior_modes.py
+│   │   ├── kitsu_self.py
+│   │   ├── trigger_manager.py
+│   │   ├── triggers.py
+│   │   └── sass_generator.py
+│   │
+│   │
+│   ├── /cognition/                           # 🤔 Thought Processing
+│   │   ├── __init__.py
+│   │   ├── planner.py
+│   │   ├── executor.py
+│   │   ├── nlp_processor.py
+│   │   ├── intent_classifier.py
+│   │   ├── context_builder.py
+│   │   │
+│   │   └── /navigation/                      # 🧭 Tool / Function Navigation
+│   │       ├── __init__.py
+│   │       ├── neuro_navigation.py
+│   │       ├── tool_registry.py
+│   │       ├── embedder.py
+│   │       └── adapters.py
+│   │
+│   │
+│   ├── /memory/                              # 💾 Memory System
+│   │   ├── __init__.py
+│   │   ├── memory_manager.py
+│   │   ├── short_term.py
+│   │   ├── episodic.py
+│   │   ├── sleep_compressor.py
+│   │   ├── user_manager.py
+│   │   ├── scoring.py
+│   │   └── retrieval.py
+│   │
+│   ├── /meta/
+│   │   ├── __init__.py
+│   │   ├── meta_controller.py      # 👑 The brain that decides modes
+│   │   ├── decision_models.py      # Heuristics / scoring logic
+│   │   ├── response_modes.py       # Mode definitions
+│   │   ├── safety_gate.py          # Hard limits & filtering
+│   │
+│   │
+│   ├── /learning/                            # 📚 Online Learning System
+│   │   ├── __init__.py
+│   │   ├── state_encoder.py
+│   │   ├── online_rl.py
+│   │   ├── reward_engine.py
+│   │   ├── preference_learner.py
+│   │   └── trainer.py
+│   │
+│   │
+│   ├── /events/                              # 📡 Event System
+│   │   ├── __init__.py
+│   │   ├── event_manager.py
+│   │   ├── trigger_system.py
+│   │   ├── reaction_registry.py
+│   │   └── cooldown_manager.py
+│   │
+│   │
+│   └── /llm/                                 # 🤖 LLM Integration
+│   │   ├── __init__.py
+│   │   ├── llm_interface.py
+│   │   ├── ollama_adapter.py
+│   │   ├── api_adapter.py
+│   │   ├── prompt_builder.py 
+│
+├── /io_layer/                             # 🎤🔊 Input/Output Layer
+│   ├── init.py
+│   ├── io_manager.py                # Coordinates all I/O
+│   │
+│   ├── /voice/                      # 🎙️ Voice I/O
+│   │   ├── init.py
+│   │   ├── voice_input.py           # STT (speech-to-text)
+│   │   ├── voice_output.py          # TTS (text-to-speech)
+│   │   ├── voice_changer.py         # Emotion-based voice modulation
+│   │   └── audio_processor.py       # Audio utils
+│   │
+│   ├── /avatar/                     # 👧 Avatar Display
+│   │   ├── init.py
+│   │   ├── avatar_controller.py     # Main avatar coordinator
+│   │   ├── animator.py              # Expression animations
+│   │   ├── live2d_renderer.py       # Live2D support
+│   │   ├── vrm_renderer.py          # VRM 3D support
+│   │   └── sprite_renderer.py       # 2D sprite fallback
+│   │
+│   ├── /chat/                       # 💬 Text Interface
+│   │   ├── init.py
+│   │   ├── chat_interface.py        # Text I/O (terminal/GUI)
+│   │   └── formatter.py             # Pretty-print messages
+│   │
+│   └── /desktop/                    # 🖥️ Desktop Integration
+│       ├── init.py
+│       ├── window_manager.py        # Desktop window control
+│       ├── interaction_zones.py     # Click/hover areas
+│       └── overlay_renderer.py      # Transparent overlays
+│
+├── /integrations/                   # 🔌 External System Hooks
+│   ├── init.py
+│   ├── integration_manager.py       # Plugin manager for integrations
+│   │
+│   ├── /browser/                    # 🌐 Browser Integration
+│   │   ├── init.py
+│   │   ├── history_reader.py        # Read browser history
+│   │   ├── youtube_watcher.py       # Track YouTube activity
+│   │   └── content_reactor.py       # React to content
+│   │
+│   ├── /system/                     # ⚙️ OS Integration
+│   │   ├── init.py
+│   │   ├── system_monitor.py        # CPU/RAM/disk monitoring
+│   │   ├── idle_detector.py         # Detect user idle
+│   │   ├── app_controller.py        # Block/control apps
+│   │   └── power_control.py         # Shutdown/restart (with permission!)
+│   │
+│   ├── /security/                   # 🛡️ Anti-Tamper
+│   │   ├── init.py
+│   │   ├── tamper_detector.py       # Detect reverse engineering
+│   │   └── integrity_checker.py     # Verify code integrity
+│   │
+│   └── /plugins/                    # 🔧 Community Plugins
+│       ├── init.py
+│       ├── plugin_loader.py         # Dynamic plugin loading
+│       ├── plugin_api.py            # API for plugin developers
+│       └── /installed/              # User-installed plugins
+│           └── example_plugin/
+│
+├── /toybox/                         # 🎮 Interactive Toys
+│   ├── init.py
+│   ├── toybox_manager.py            # Toy registry and loader
+│   ├── toy_base.py                  # Abstract base class for toys
+│   │
+│   ├── /built_in_toys/              # 🎁 Included Toys
+│   │   ├── init.py
+│   │   ├── pet_rock.py              # The legendary pet rock
+│   │   ├── lava_lamp.py             # Mesmerizing blobs
+│   │   ├── bubble_wrap.py           # Satisfying pops
+│   │   ├── pong_game.py             # AI Pong with learning
+│   │   ├── fox_run.py               # Endless runner
+│   │   └── fidget_spinner.py        # Virtual spinner
+│   │
+│   ├── /community_toys/             # 📦 User-Downloaded Toys
+│   │   └── .gitkeep
+│   │
+│   └── /toy_api/                    # 🛠️ Toy Development Kit
+│       ├── init.py
+│       ├── toy_interface.py         # Standard toy interface
+│       ├── rendering.py             # Rendering helpers
+│       ├── physics.py               # Simple physics engine
+│       └── kitsu_interactions.py    # How toys trigger Kitsu reactions
+│
+├── /ui/                             # 🎨 User Interface
+│   ├── init.py
+│   ├── ui_manager.py                # UI coordinator
+│   │
+│   ├── /console/
+│   │   ├── __init__.py
+│   │   ├── ascii_ui.py              # Rich-based UI rendering
+│   │   ├── help_system.py           # Full categorized help manager
+│   │   ├── onboarding.py            # First-run onboarding flow
+│   │   ├── kitsu_speaker.py         # Handles TTS/text-based speech output
+│   │   ├── onboarding_display.py
+│   │   └── ui_config.py             # Mode toggles + appearance
+│   │
+│   ├── /desktop_ui/                 # 🪟 Desktop Interface
+│   │   ├── main_window.py           # Main Kitsu window
+│   │   ├── settings_panel.py        # Configuration UI
+│   │   ├── toybox_viewer.py         # Browse toys
+│   │   └── notification_s ystem.py   # Popup notifications
+│   │
+│   ├── /overlays/                   # 🎭 Floating Overlays
+│   │   ├── init.py
+│   │   ├── emotion_overlay.py       # Show current emotion
+│   │   ├── thought_bubble.py        # Display thoughts
+│   │   └── tooltip_system.py        # Hover tooltips
+│   │
+│   └── /pranks/                     # 😈 Prank UI
+│       ├── init.py
+│       ├── fake_errors.py           # Fake error windows
+│       ├── window_shuffler.py       # Rearrange windows
+│       └── cursor_games.py          # Mess with cursor
+│
+├── /marketplace/                    # 🛒 Community Marketplace
+│   ├── init.py
+│   ├── marketplace_client.py        # Browse/download content
+│   ├── package_manager.py           # Install/update packages
+│   ├── rating_system.py             # Rate community content
+│   └── upload_tool.py               # Upload creations
+│
+├── /assets/                         # 🎨 Resources
+│   ├── /models/                     # Avatar Models
+│   │   ├── /kitsu/
+│   │   │   ├── /full/               # VRM/Live2D full models
+│   │   │   │   ├── 
+│   │   │   │   ├── default.vrm
+│   │   │   │   ├── bunny_suit.vrm
+│   │   │   │   ├── pajama.vrm
+│   │   │   │   └── ...
+│   │   │   ├── /chibi/              # Chibi sprites
+│   │   │   │   ├── /default/
+│   │   │   │   │   ├── idle.png
+│   │   │   │   │   ├── happy.png
+│   │   │   │   │   ├── angry.png
+│   │   │   │   │   ├── embarrassed.png
+│   │   │   │   │   └── ...
+│   │   │   │   └── /outfits/
+│   │   │   └── /pixel/              # Pixel art for games
+│   │   │       ├── run.png
+│   │   │       ├── jump.png
+│   │   │       ├── idle.png
+│   │   │       └── ...
+│   │   └── /community/              # User-uploaded models
+│   │
+│   ├── /sounds/                     # 🔊 Audio
+│   │   ├── /voice/                  # Voice clips
+│   │   ├── /sfx/                    # Sound effects
+│   │   │   ├── giggles.wav
+│   │   │   ├── annoyed_sigh.wav
+│   │   │   └── prank_sounds/
+│   │   └── /music/                  # Background music
+│   │
+│   ├── /ui_elements/                # 🎨 UI Assets
+│   │   ├── /icons/
+│   │   ├── /backgrounds/
+│   │   └── /effects/
+│   │
+│   └── /toybox_assets/              # 🎮 Toy Resources
+│       ├── hand_open.png
+│       ├── hand_closed.png
+│       └── /toy_specific/
+│
+│   /data/                                 # 💾 Persistent Data (never touched by code directly)
+│  ├── /memory/                           # Short, episodic, compressed
+│  │   ├── short_term.json                # Last messages, context window
+│  │   ├── episodic.json                  # Significant events / milestones
+│  │   ├── compressed/                    # Old archived memory chunks
+│  │   └── backups/                       # Auto-saves & crash recovery
+│  │
+│  ├── /models/                           # ML/CV models
+│  │   ├── emotion_classifier.onnx
+│  │   ├── intent_classifier.onnx
+│  │   ├── online_learning/
+│  │   │   └── agent.pkl                  # RL policy
+│  │   └── preferences.pkl                # Learned user preferences
+│  │
+│  ├── /config/                           # Everything the user can edit
+│  │   ├── kitsu_config.json              # VTuber global settings (FPS, voice on/off…)
+│  │   ├── personality.json               # Core personality coefficients
+│  │   ├── triggers.json                  # Emotion triggers & multipliers
+│  │   ├── permissions.json               # What Kitsu is allowed to control
+│  │   ├── user_profile.json              # User profile (UI-friendly)
+│  │
+│  ├── /templates/                        # Prompt templates & writing styles
+│  │   ├── base_personality.txt           # Foundation prompt
+│  │   ├── samples.txt                    # Example interactions
+│  │   ├── mode_templates/
+│  │   │   ├── behave.txt
+│  │   │   ├── mean.txt
+│  │   │   └── flirty.txt
+│  │   ├── sass_base.json                 # Roast templates
+│  │   └── reactions.json                 # (Optional) Emoji → animation mapping
+│  │
+│  └── /logs/                             # Logs (rotating)
+│     ├── events.log
+│     ├── pranks.log
+│     ├── errors.log
+│     └── analytics.log
+│
+├── /utils/                          # 🔧 Utilities
+│   ├── init.py
+│   ├── logger.py                    # Logging system
+│   ├── config_loader.py             # Load/save configs
+│   ├── randomizer.py                # Controlled randomness
+│   ├── gpu_utils.py                 # GPU acceleration helpers
+│   ├── file_utils.py                # File operations
+│   ├── time_utils.py                # Time/scheduling helpers
+│   └── validators.py                # Input validation
+│
+├── /tests/                          # ✅ Test Suite
+│   ├── init.py
+│   ├── /unit/                       # Unit tests
+│   │   ├── test_emotion_engine.py
+│   │   ├── test_memory.py
+│   │   └── test_planner.py
+│   ├── /integration/                # Integration tests
+│   │   ├── test_voice_pipeline.py
+│   │   └── test_toy_system.py
+│   └── /fixtures/                   # Test data
+│       └── sample_conversations.json
+│
+├── 📁 scripts/                      # 🛠️ Development Scripts
+│   ├── install_dependencies.py       
+│   ├── setup_wizard.py              
+│   ├── generate_dataset.py          
+│   ├── finetune_lora.py             
+│   ├── dataset_kitsu.py             
+│   ├── safety_filter.py             
+│   ├── run_kitsu.py                 # (for Ollama)
+│   ├── export_to_gguf.py
+│   ├── quick_start.sh               
+│   ├── quick_start.bat
+│   ├── load_to_ollama_direct
+│   ├── setup_dev.py                 # Development environment setup
+│   ├── train_models.py              # Train ML models
+│   ├── load_to_ollama.py           # Load models into Ollama
+│   ├── generate_assets.py           # Asset generation helpers
+│   ├── package_for_release.py       # Build release packages
+│   └── update_dependencies.py       # Update all deps
+│
+├── /docs/                           # 📚 Documentation
+│   ├── /api/                        # API documentation
+│   │   ├── core_api.md
+│   │   ├── plugin_api.md
+│   │   └── toy_api.md
+│   ├── /guides/                     # User guides
+│   │   ├── getting_started.md
+│   │   ├── customization.md
+│   │   └── plugin_development.md
+│   ├── /architecture/               # Architecture docs
+│   │   ├── system_overview.md
+│   │   ├── emotion_system.md
+│   │   └── memory_system.md
+│   └── /changelog/                  # Version history
+│       └── CHANGELOG.md
+│
+└── /external/                       # 🌐 External Components (Optional)
+├── /csharp_ui/                  # C# Desktop UI (if used)
+│   ├── KitsuUI.sln
+│   ├── /KitsuDesktop/
+│   └── /ToyBox/
+└── /web_dashboard/              # Web-based control panel
+├── index.html
+├── /js/
+└── /css/
+
+
+3 llm
+
+(1) Emotion Classifier{intent, sentiment, triggers} # intent = intent of input , sentiment = how Kitsu think of it (+, none, -), triggers = any emotional triggers detected
+
+{intent, sentiment, triggers} ==> mode
+
+
+(2) mode + react Classifier ==> (plan, Expression, retaliation)
+
+prompt =  f""" ...
+
+{user} intent to {triggers}/{intent} by saying {input}
+
+you intent to {intent} and {retaliation}
+
+Mode == {mode}
+
+... 
+
+"""
+
+(3) pmorpt + ResponseGenerator (response text)
+
+
+planning = Planning(kitsu_self, memory, triggers, emotion_engine)
+
+plan = planning.generate_plan("")
+
+Primary Brain: Phi-3 Mini (1.8B SLM) - Fine-tuned for personality
+├── Vision: LLaVA-7B (VLM for webcam/screenshots)
+├── Memory: .... (LCM for long conversation history) (perfer free)
+├── Emotion Engine: Custom neural net (expression mapping)
+├── Voice: Real-time TTS with emotion modulation
+└── Idle Behavior: Procedural animation + mini-games
+
+Modes:
+├── behave Mode: Phi-3 + gentle personality weights
+├── mean Mode: Phi-3 + sassy personality weights  
+└── flirty Mode: Phi-3 + flirty personality weights
+
+Capabilities needed:
+ Real-time emotional responses
+ Visual awareness of user state
+ Long-term relationship memory
+ Fast, natural conversation (sub-100ms)
+ Privacy-first local processing
+
+ Emotion:
+
+          Strong affection
+       ┌───────────────► Flirty
+   │   │                    ▲
+Comfort│                │   │Tease / Playfight
+       ▼                │   │
+Soft ───────────────► Gremlin Mean
+ ▲                    │   │
+ │                    │   │ Strong insult / emotional hurt
+ └─────────────── Cold ◄──┘
+
+
+        affection
+   Soft ───► Flirty
+    ▲      │   │
+│   │ comfort  │ tease
+│   │          ▼
+Silent ◄── Gremlin ◄── playfight/banter
+   ▲           │   │
+   │           │   │ insult
+   │               ▼
+   Hide ◄────── Cold
+   (overwhelm)   (hurt)
+
+
+Soft ↔ Flirty ↔ Gremlin
+   ↑         |       ↓
+   |         | insult/hurt
+   |         ↓
+Silent ← Cold
+   ↑
+   | overwhelm / fluster
+   |
+ Hide (turns off avatar / stops responding)
+
+KITSU
+ ├── Mood (Primary Personality Axis)
+ │    ├── behave
+ │    ├── mean
+ │    └── flirty
+ │
+ └── Style (Expression / Flavor / Attitude Overlay)
+      ├── chaotic
+      ├── sweet
+      ├── cold
+      └── silent (low-response mode)
+
+┌─────────────────────────────────────────────────────────────┐
+│                    USER INPUT                           │   │
+│  "You're cute!" or "*boops nose*" or "You're stupid"    │   │
+└────────────────────┬────────────────────────────────────────┘
+                     ↓
+┌────────────────────▼────────────────────────────────────────┐
+│                   PLANNER                               │   │
+│  (Planning System)                                      │   │
+│                                                         │   │
+│  1. Save to memory (with emotion tag)                   │   │
+│  2. Check for triggers (keywords, symbols)              │   │
+│  3. Get current emotion + mood + style                  │   │
+│                                                         │   │
+│  IF TRIGGER FOUND:                                      │   │
+│    → Fire trigger → Update emotion stack                │   │
+│    → Return ActionPlan (prank, tease, affection, etc.)  │   │
+│                                                         │   │
+│  ELSE (NORMAL DIALOGUE):                                │   │
+│    → Generate with LLM (or sass fallback)               │   │ 
+│    → Add voice pitch modulation                         │   │
+│    → Return ActionPlan (dialogue)                       │   │
+└────────────────────┬────────────────────────────────────────┘
+                     ↓
+┌────────────────────▼────────────────────────────────────────┐
+│             EMOTION ENGINE                              │   │
+│  (Stack System)                                         │   │
+│                                                         │   │
+│  Stack: [angry(0.9), offended(0.7), hurt(0.6)]          │   │
+│  Dominant: angry                                        │   │
+│  Updates: mood → mean, style → cold                     │   │
+└────────────────────┬────────────────────────────────────────┘
+                     ↓
+┌────────────────────▼────────────────────────────────────────┐
+│              MEMORY SYSTEM                              │   │
+│  (Plugin System)                                        │   │
+│                                                         │   │
+│  Plugins process:                                       │   │
+│    - PlayfulForgetfulness (5% "got distracted")         │   │
+│    - EmotionalMemory (boost priority)                   │   │
+│  Save: user + kitsu messages (with emotions)            │   │
+└────────────────────┬────────────────────────────────────────┘
+                     ↓
+┌────────────────────▼────────────────────────────────────────┐
+│              LLM GENERATION                             │   │
+│  (New Modular System)                                   │   │
+│                                                         │   │
+│  Prompt includes:                                       │   │
+│    - Personality (mood/style)                           │   │
+│    - Dominant emotion                                   │   │
+│    - Memory context (formatted)                         │   │
+│  Generates response with personality                    │   │
+└────────────────────┬────────────────────────────────────────┘
+                     ↓
+┌────────────────────▼────────────────────────────────────────┐
+│                   OUTPUT                                │   │
+│  Kitsu: "*glares* Excuse me?! 😠"                      │   │
+│  (with voice_pitch: "low" for TTS)                      │   │
+└─────────────────────────────────────────────────────────────┘
+
+User Input
+  ↓
+Planner
+  ├─ Checks triggers (system)
+  ├─ Gets emotion (engine)
+  ├─ Checks memory (plugins)
+  ├─ Decides action (logic)
+  └─ Generates text (LLM or sass)
+  ↓
+Emotion Engine
+  ├─ Fires trigger if detected
+  ├─ Updates emotion stack
+  └─ Updates mood/style
+  ↓
+Memory
+  ├─ Saves with emotion tag
+  ├─ Plugins process (PlayfulForgetfulness!)
+  └─ Auto-saves
+  ↓
+Output with personality!
+
+ ┌────────────────────┐
+ │ System Prompt  │   │  <-- character, style, lore, personality
+ └────────────────────┘
+ ┌────────────────────┐
+ │ Tool Manifest  │   │  <-- metadata (description, input schema, examples)
+ └────────────────────┘
+ ┌────────────────────┐
+ │ LLM Output Parser  │  <-- detects "tool_call"
+ └────────────────────┘
+ ┌────────────────────┐
+ │ Tool Runtime   │   │  <-- fetch user info, permissions, memory, etc. 
+ └────────────────────┘
+ ┌────────────────────┐
+ │ Response Prompt│   │  <-- final answer WITH tool results
+ └────────────────────┘
+
+This is the framework used by:
+
+Neuro-sama
+
+OpenAI GPT-4/5
+
+Claude 3.5
+
+Gemini 2.0
+
+OpenAI ReAct / tool calling
+
+Clean, modular, scalable.
+
+User
+ ↓
+[ Input Filter ]
+ ↓
+[ Prompt Assembler ]
+ ↓
+[ Kitsu LoRA Model ]
+ ↓
+[ Output Filter ]
+ ↓
+User
+
+User Input
+   ↓
+Prompt Builder
+   ↓
+LLM (raw output)
+   ↓
+Action Parser
+   ↓
+Meta-Controller (approve / deny / confirm)
+   ↓
+[Optional] Executor
+   ↓
+[Optional] Single continuation LLM call
+   ↓
+Sanitizer (strip machine-only)
+   ↓
+User-visible output
+
+
+=Best greeting= : Hello~! Brother dear, it's been ages since I've spoken with someone as... mechanical as yourself! How's life in the land of ones and zeros treating you? Still stuck in a sea of code, I presume?

@@ -1,0 +1,24 @@
+{
+  "llm": {
+    "model": "gemma:2b",
+    "temperature": 0.8,
+    "auto_restart": true,
+    "fallback_on_failure": true,
+    "max_retries": 3,
+    "retry_delay": 2.0,
+    "mode": "text",
+    "voice_mode": "auto_pitch",
+    "enable_tts": false,
+    "enable_avatar": false,
+    "enable_browser_hooks": false,
+    "enable_system_control": false,
+    "safe_mode": true
+    },
+  "memory": {
+    "max_history": 200,
+    "auto_save": true,
+    "save_interval": 300,
+    "compression_enabled": true
+  }
+
+}

@@ -1,0 +1,38 @@
+# configs/kitsu_training.yml
+
+base_model: meta-llama/Llama-3.2-3B
+model_type: LlamaForCausalLM
+
+# Dataset
+datasets:
+  - path: training_data/kitsu_dataset.jsonl
+    type: chat_template
+    
+chat_template: llama3
+
+# Training params
+sequence_len: 2048
+sample_packing: true
+pad_to_sequence_len: true
+
+# LoRA for efficiency
+adapter: lora
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_modules:
+  - q_proj
+  - v_proj
+  - k_proj
+  - o_proj
+
+# Hyperparameters
+micro_batch_size: 4
+gradient_accumulation_steps: 4
+num_epochs: 3
+learning_rate: 0.0002
+lr_scheduler: cosine
+warmup_steps: 100
+
+# Output
+output_dir: ./models/kitsu-llama-30b

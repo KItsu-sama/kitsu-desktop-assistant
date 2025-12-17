@@ -1,0 +1,7 @@
+{
+  "default_mood": "behave",
+  "default_style": "chaotic",
+  "emotion_decay_rate": 0.1,
+  "emotion_threshold": 0.3,
+  "max_stack_size": 5
+}

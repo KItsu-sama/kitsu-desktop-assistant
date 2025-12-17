@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Runtime / generated
+data/config.json
+data/.first_run_complete
+data/training/
+data/models/
+logs/
+
+# Secrets
+*.env

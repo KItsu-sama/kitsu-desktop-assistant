@@ -1,0 +1,15 @@
+{
+  "sessions": [],
+  "state": {
+    "kitsu_self": {
+      "reflection": {
+        "behave": 0.5,
+        "meanable": 0.5,
+        "angry": 0.0,
+        "happy": 0.5
+      },
+      "mode": "behave",
+      "error_flag": false
+    }
+  }
+}

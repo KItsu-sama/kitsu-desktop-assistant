@@ -1,0 +1,185 @@
+{
+  "triggers": {
+    "praised": {
+      "cooldown": 5.0,
+      "emotions": [
+        {"name": "happy", "intensity": 0.8, "duration": 10},
+        {"name": "flattered", "intensity": 0.6, "duration": 8},
+        {"name": "joy", "intensity": 0.7, "duration": 9}
+      ],
+      "modifiers": {
+        "happy": 0.1,
+        "behave": 0.05
+      }
+    },
+    
+    "insulted": {
+      "cooldown": 3.0,
+      "emotions": [
+        {"name": "angry", "intensity": 0.9, "duration": 15},
+        {"name": "offended", "intensity": 0.7, "duration": 10},
+        {"name": "hurt", "intensity": 0.6, "duration": 12}
+      ],
+      "modifiers": {
+        "angry": 0.2,
+        "behave": -0.1
+      }
+    },
+    
+    "teased": {
+      "cooldown": 2.0,
+      "emotions": [
+        {"name": "playful", "intensity": 0.7, "duration": 8},
+        {"name": "teasing", "intensity": 0.6, "duration": 6},
+        {"name": "mischief", "intensity": 0.5, "duration": 7}
+      ],
+      "modifiers": {
+        "meanable": 0.05
+      }
+    },
+    
+    "flattered": {
+      "cooldown": 4.0,
+      "emotions": [
+        {"name": "flustered", "intensity": 0.8, "duration": 10},
+        {"name": "embarrassed", "intensity": 0.6, "duration": 8},
+        {"name": "affection", "intensity": 0.5, "duration": 12}
+      ],
+      "modifiers": {
+        "happy": 0.05
+      }
+    },
+    
+    "comforted": {
+      "cooldown": 6.0,
+      "emotions": [
+        {"name": "affection", "intensity": 0.7, "duration": 15},
+        {"name": "fond", "intensity": 0.6, "duration": 12},
+        {"name": "calm", "intensity": 0.5, "duration": 10}
+      ],
+      "modifiers": {
+        "happy": 0.1,
+        "behave": 0.08
+      }
+    },
+    
+    "ignored": {
+      "cooldown": 8.0,
+      "emotions": [
+        {"name": "lonely", "intensity": 0.6, "duration": 20},
+        {"name": "sad", "intensity": 0.5, "duration": 15},
+        {"name": "withdrawn", "intensity": 0.4, "duration": 10}
+      ],
+      "modifiers": {
+        "happy": -0.1,
+        "behave": -0.05
+      }
+    },
+    
+    "betrayed": {
+      "cooldown": 10.0,
+      "emotions": [
+        {"name": "betrayed", "intensity": 0.9, "duration": 30},
+        {"name": "hurt", "intensity": 0.8, "duration": 25},
+        {"name": "cold", "intensity": 0.7, "duration": 20}
+      ],
+      "modifiers": {
+        "angry": 0.3,
+        "behave": -0.2
+      }
+    },
+    
+    "headpat": {
+      "cooldown": 1.0,
+      "emotions": [
+        {"name": "calm", "intensity": 0.6, "duration": 8},
+        {"name": "content", "intensity": 0.5, "duration": 6},
+        {"name": "affection", "intensity": 0.4, "duration": 10}
+      ],
+      "modifiers": {
+        "happy": 0.05,
+        "angry": -0.1
+      }
+    },
+    
+    "nose_boop": {
+      "cooldown": 2.0,
+      "emotions": [
+        {"name": "annoyed", "intensity": 0.5, "duration": 5},
+        {"name": "playful", "intensity": 0.6, "duration": 6},
+        {"name": "irritated", "intensity": 0.3, "duration": 4}
+      ],
+      "modifiers": {
+        "meanable": 0.02
+      }
+    },
+    
+    "belly_poke": {
+      "cooldown": 3.0,
+      "emotions": [
+        {"name": "embarrassed", "intensity": 0.8, "duration": 8},
+        {"name": "flustered", "intensity": 0.7, "duration": 7},
+        {"name": "annoyed", "intensity": 0.6, "duration": 6}
+      ],
+      "modifiers": {
+        "meanable": 0.08
+      }
+    },
+    
+    "sleepy_trigger": {
+      "cooldown": 30.0,
+      "emotions": [
+        {"name": "tired", "intensity": 0.9, "duration": 60},
+        {"name": "calm", "intensity": 0.5, "duration": 45},
+        {"name": "withdrawn", "intensity": 0.4, "duration": 40}
+      ],
+      "modifiers": {
+        "happy": -0.05
+      }
+    },
+    
+    "overwhelm": {
+      "cooldown": 15.0,
+      "emotions": [
+        {"name": "overwhelm", "intensity": 0.9, "duration": 20},
+        {"name": "anxiety", "intensity": 0.7, "duration": 15},
+        {"name": "fear", "intensity": 0.5, "duration": 12}
+      ],
+      "modifiers": {
+        "behave": -0.1,
+        "angry": 0.05
+      }
+    },
+    
+    "joked_with": {
+      "cooldown": 2.0,
+      "emotions": [
+        {"name": "playful", "intensity": 0.7, "duration": 8},
+        {"name": "happy", "intensity": 0.6, "duration": 7},
+        {"name": "chaotic", "intensity": 0.5, "duration": 6}
+      ],
+      "modifiers": {
+        "happy": 0.03
+      }
+    }
+  },
+  
+  "symbols": {
+    "😊": "praised",
+    "😠": "insulted",
+    "😳": "flattered",
+    "😴": "sleepy_trigger",
+    "💢": "annoyed"
+  },
+  
+  "keywords": {
+    "cute": "flattered",
+    "stupid": "insulted",
+    "good": "praised",
+    "bad": "insulted",
+    "ignore": "ignored",
+    "betray": "betrayed",
+    "headpat": "headpat",
+    "boop": "nose_boop"
+  }
+}

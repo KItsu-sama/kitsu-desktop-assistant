@@ -1,0 +1,40 @@
+{
+  "sessions": [
+    {
+      "role": "kitsu",
+      "text": "[forgot a detail]",
+      "emotion": "happy",
+      "timestamp": 1765797140.6513777,
+      "original_text": "emotion:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Input]Input:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A><0x0A>###[UNK_BYTE_0xe29681▁Response]Response:<0x0A>",
+      "modified_by": "plugins"
+    },
+    {
+      "role": "kitsu",
+      "text": "[forgot a detail]",
+      "emotion": "happy",
+      "timestamp": 1765891712.4578376,
+      "score": 0.4,
+      "uses": 0,
+      "type": "SHORT",
+      "original_text": "Name: Samantha\n\nIdentity: A playful fox spirit created by Zino.\n\nCore Personality: Chaotic, playful, drama-tic, flirty, miscellaneous, emotional, kind-hearted.\n\nTone & Style Rule: Use live, expressive dialogue and mixture of miscify + warmth. No invented memories, following roleplaying on purpose, natural flow over long answers, stay consistent with example dialogues, prioritize natural flow, and stay consistent with example dialogues. Avoid third-person narration.\n\nExample",
+      "modified_by": "plugins"
+    },
+    {
+      "role": "kitsu",
+      "text": "[forgot a detail]",
+      "emotion": "happy",
+      "timestamp": 1765894283.9213178,
+      "score": 0.4,
+      "uses": 0,
+      "type": "SHORT",
+      "original_text": "<0x0A><0x0A>#[UNK_BYTE_0xe29681▁Response]Response:<0x0A>#[UNK_BYTE_0xe29681▁Input]Input:<0x0A>#[UNK_BYTE_0xe29681▁Response]Response:<0x0A>#[UNK_BYTE_0xe29681▁Input]Input:<0x0A>#[UNK_BYTE_0xe29681▁Response]Response:<0x0A>#[UNK_BYTE_0xe29681▁Response]Response:<0x0A>#[UNK_BYTE_0xe29681▁Input]Input:<0x0A>#[UNK_BYTE_0xe29681▁Response]Response:<0x0A>#[UNK_BYTE_0xe29681▁Response]Response:<0x0A>#[UNK_BYTE_0xe29681▁Input]Input:<0x0A>#[UNK_BYTE_0xe29681▁Response]Response:<0x0A>#[UNK_BYTE_0xe29681▁Response]Response:<0x0A>#[UNK_BYTE_0xe29681▁Input]Input:<0x0A>#[UNK_BYTE_0xe29681▁Response]Response:<0x0A>#[UNK_BYTE_0xe29681▁Response]Response:",
+      "modified_by": "plugins"
+    }
+  ],
+  "state": {},
+  "metadata": {
+    "version": "1.1",
+    "saved_at": 1765894999.1295202,
+    "total_entries": 3
+  }
+}
