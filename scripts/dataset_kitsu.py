@@ -15,7 +15,7 @@ def create_training_sample(
     Create a training sample with metadata tags
     This is the format your model will learn
     """
-    # Build context header (this becomes your minimal prompt)
+    # Build context header
     context_parts = [
         f"emotion: {emotion}",
         f"mood: {mode}",

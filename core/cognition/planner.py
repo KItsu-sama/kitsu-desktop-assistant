@@ -1,6 +1,6 @@
 """
 Integrated Planner System
-Your planning logic adapted for the new modular architecture
+planning logic adapted for the new modular architecture
 
 File location: core/cognition/planner.py
 """
@@ -49,7 +49,7 @@ class ActionPlan:
 
 
 # =============================================================================
-# Sass Generator (Your Logic)
+# Sass Generator
 # =============================================================================
 
 class SassGenerator:
@@ -98,7 +98,7 @@ class SassGenerator:
 
 
 # =============================================================================
-# Behavior Modes (Your Mode System)
+# Behavior Modes
 # =============================================================================
 
 class BehaviorModes:
@@ -189,7 +189,7 @@ class Planner:
         log.info("Planner initialized")
     
     # =========================================================================
-    # Voice Pitch (Your Logic)
+    # Voice Pitch
     # =========================================================================
     
     def _derive_pitch(self, emotion: str) -> str:
@@ -221,7 +221,7 @@ class Planner:
         return "default"
     
     # =========================================================================
-    # Text Decision Logic (Your Logic + LLM Integration)
+    # Text Decision Logic
     # =========================================================================
     
 # core/cognition/planner.py (modified)
@@ -265,7 +265,7 @@ class Planner:
         mode: str
     ) -> str:
         """
-        Fallback text generation (Your original logic)
+        Fallback text generation
         Used when LLM is unavailable or fails
         """
         lower = user_text.lower()
@@ -401,7 +401,7 @@ class Planner:
         if not self.trigger_manager:
             return None
         
-        # Use trigger manager's resolve_trigger method (from your code)
+        # Use trigger manager's resolve_trigger method
         if hasattr(self.trigger_manager, 'triggers'):
             # Check symbols
             for symbol, trigger_name in self.trigger_manager.triggers.get("symbols", {}).items():

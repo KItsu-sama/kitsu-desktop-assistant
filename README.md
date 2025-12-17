@@ -133,3 +133,10 @@ Where to go next
 
 If something is unclear or a script fails, open an issue with the failing command and any console output — the code is designed to be readable and easy to debug.
 
+
+## Model & Data Notice
+
+This repository contains code only.  
+Models, LoRA adapters, and generated datasets are user-created artifacts and
+are not covered by this license unless explicitly stated.
+

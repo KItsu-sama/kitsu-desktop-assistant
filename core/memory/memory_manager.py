@@ -1,6 +1,6 @@
 """
 Integrated Memory System
-Your plugin-based memory system adapted for the new modular architecture
+plugin-based memory system adapted for the new modular architecture
 
 File location: core/memory/memory_manager.py
 """
@@ -40,7 +40,7 @@ class MemoryConfig:
 
 
 # =============================================================================
-# Plugin Interface (Your Design - Preserved)
+# Plugin Interface
 # =============================================================================
 
 class MemoryPlugin(Protocol):
@@ -85,7 +85,7 @@ class MemoryPlugin(Protocol):
 
 
 # =============================================================================
-# Core Plugins (Your Implementations)
+# Core Plugins
 # =============================================================================
 
 class PlayfulForgetfulnessPlugin:

@@ -317,7 +317,7 @@ class KitsuIntegrated:
                 # Reward will be calculated on next user response
             self.rl_engine.record_interaction(context, response)
             
-            # Step 8: Save to memory (using your plugin system!)
+            # Step 8: Save to memory
             self.memory.remember("user", user_input, emotion=dominant)
             self.memory.remember("kitsu", response, emotion=dominant)
             

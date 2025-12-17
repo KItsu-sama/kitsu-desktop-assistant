@@ -8,10 +8,10 @@ Features:
 - Field normalization and allowed-fields enforcement
 - set_user_info / get_user_info / reset_user_info
 - Creator fingerprint generation and verification (locks Creator status)
-- CLI-friendly helpers for your existing `/user` command
+- CLI-friendly helpers  `/user` command
 - Safe defaults and audit logging
 
-Drop this into /core/user_manager.py and import it from your main orchestrator.
+Drop this into /core/user_manager.py and import it from main orchestrator.
 """
 
 import json
@@ -372,7 +372,7 @@ class UserManager:
     # Helpers for CLI integration
     # -----------------------------
     def handle_user_command(self, command: str) -> str:
-        """A convenience wrapper for your /user CLI command.
+        """A convenience wrapper for /user CLI command.
 
         Returns a human-friendly message string (safe to print).
         """

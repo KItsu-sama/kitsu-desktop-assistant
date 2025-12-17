@@ -5,7 +5,7 @@ Replace ADMIN_USERS with your real admin names or check memory-based auth.
 """
 
 
-ADMIN_USERS = ["Zino", "Natadaide"]
+ADMIN_USERS = ["Zino", "Alice", "Bob"]  # Replace with real admin usernames
 
 
 # Toggle which commands are enabled (useful for production)
