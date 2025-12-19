@@ -12,6 +12,7 @@ import argparse
 import json
 import math
 import time
+import random
 from pathlib import Path
 from typing import Optional
 
@@ -60,50 +61,49 @@ def load_training_data(path: Path, style_filter: Optional[str] = None) -> Datase
     if not path.exists():
         raise FileNotFoundError(f"Training data not found: {path}")
 
-    with open(path, "r", encoding="utf-8") as f:
-        raw = json.load(f)
-
     rows = []
-    for item in raw:
-        emotion = item.get("emotion", "neutral")
-        mood = item.get("mood", "behave")
-        style = item.get("style", "calm")
-        # If a style_filter is provided, skip items that don't match. This
-        # enables training separate LoRA adapters per style without mixing.
-        if style_filter and style != style_filter:
-            continue
-        memory = item.get("memory", [])
-        user = item.get("user", "")
-        assistant = item.get("assistant", "")
+    # Expect JSONL where each line is a conversation with messages[] and metadata
+    with open(path, "r", encoding="utf-8") as f:
+        for ln in f:
+            if not ln.strip():
+                continue
+            item = json.loads(ln)
+            meta = item.get("metadata", {})
+            mood = meta.get("mood", "behave")
+            style = meta.get("style", "calm")
+            emotion = meta.get("emotion", "neutral")
 
-        # Inject up to 2 memories before the user turn; keep them as internal context
-        memory_line = ""
-        if memory:
-            memory_line = "memory: " + ", ".join(memory[:2]) + "\n\n"
+            if style_filter and style != style_filter:
+                continue
 
-        # Enforce <continue> placement rules for training: if <continue> appears
-        # inside an assistant chunk with trailing text, split into two assistant
-        # segments so that the first ends with <continue> and is followed by a
-        # second <assistant> chunk. This makes continuation behavior explicit
-        # during training and avoids learning unsafe placements.
-        if "<continue>" in assistant:
-            idx = assistant.find("<continue>")
-            before = assistant[:idx].strip()
-            after = assistant[idx + len("<continue>") :].strip()
-            if after:
-                # Create two assistant segments in the same sample
-                assistant = f"{before} <continue>\n\n<assistant>\n{after}"
-            else:
-                assistant = f"{before} <continue>"
+            messages = item.get("messages", [])
+            # Validate and extract user/assistant pairs
+            for i in range(0, len(messages) - 1, 2):
+                u = messages[i]
+                a = messages[i + 1]
+                if u.get("role") != "user" or a.get("role") != "assistant":
+                    # skip malformed pairs
+                    continue
 
-        text = (
-            f"emotion: {emotion} | mood: {mood} | style: {style}\n"
-            f"{memory_line}"
-            f"<user>\n{user}\n\n"
-            f"<assistant>\n{assistant}"
-        )
+                user = u.get("content", "").strip()
+                assistant = a.get("content", "").strip()
 
-        rows.append({"text": text})
+                if not user or not assistant:
+                    continue
+
+                # Ensure no system/persona markers leaked into content
+                forbidden = ["you are kitsu", "you are the assistant", "as an ai"]
+                combined_lower = (user + " " + assistant).lower()
+                if any(f in combined_lower for f in forbidden):
+                    continue
+
+                text = (
+                    f"emotion: {emotion} | mood: {mood} | style: {style}\n"
+                    f"<user>\n{user}\n\n"
+                    f"<assistant>\n{assistant}"
+                )
+
+                rows.append({"text": text})
 
     return Dataset.from_list(rows)
 
@@ -185,21 +185,33 @@ def estimate_eta(num_samples, args):
 
 def train():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--style", type=str, default="chaotic", help="Style name for this LoRA adapter (chaotic/calm)")
+    parser.add_argument("--style", type=str, default=None, help="Optional single style to train (chaotic/sweet/cold/silent)")
+    parser.add_argument("--min-samples", type=int, default=400, help="Minimum samples required to start a training job")
     parser.add_argument("--probe-interval", type=int, default=500, help="Probe interval in steps (0 to disable)")
+    parser.add_argument("--data-path", type=str, default="data/training/kitsu_dataset.jsonl", help="JSONL dataset path")
+    parser.add_argument("--seed", type=int, default=0, help="Random seed for deterministic runs (0 = system)")
+    parser.add_argument("--no-core", action="store_true", help="Do not train kitsu-core; only train specified style")
     args_cli = parser.parse_args()
 
-    STYLE = args_cli.style or "chaotic"
+    STYLE = args_cli.style
     PROBE_INTERVAL = max(0, int(args_cli.probe_interval))
+    MIN_SAMPLES = int(args_cli.min_samples)
+    DATA_PATH = Path(args_cli.data_path)
+    SEED = None if args_cli.seed == 0 else int(args_cli.seed)
 
-    data_path = Path("data/training/kitsu_personality.json")
-    # Output dir includes style to allow multiple LoRA adapters on the same base
-    output_dir = Path(f"data/models/kitsu-lora-{STYLE}")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Sanity: allowed styles
+    ALLOWED_STYLES = {"chaotic", "sweet", "cold", "silent"}
+    if STYLE and STYLE not in ALLOWED_STYLES:
+        raise ValueError(f"Unknown style: {STYLE}. Allowed: {', '.join(sorted(ALLOWED_STYLES))}")
+
+    # Output dirs
+    core_output = Path("data/models/kitsu-lora-core")
+    style_output = Path(f"data/models/kitsu-lora-{STYLE}") if STYLE else None
 
     print("\n📚 Loading dataset...")
-    dataset = load_training_data(data_path, style_filter=STYLE)
-    print(f"✅ Samples: {len(dataset)}")
+    # Core training uses all samples
+    all_ds = load_training_data(DATA_PATH, style_filter=None)
+    print(f"✅ Total samples available: {len(all_ds)}")
 
     print("\n📥 Loading model...")
     # Use the non-chat base model to avoid chat-template behavior during fine-tuning
@@ -239,6 +251,11 @@ def train():
 
     model = get_peft_model(model, lora)
     model.print_trainable_parameters()
+
+    # deterministic seed
+    if SEED is not None:
+        random.seed(SEED)
+        torch.manual_seed(SEED)
 
     # =========================
     # Probe callback for early overfit detection (lightweight, training-only)
@@ -316,7 +333,13 @@ def train():
     )
 
     print("\n🎯 Training...")
-    trainer.train()
+    try:
+        trainer.train()
+    except KeyboardInterrupt:
+        print("\n⚠️ Training interrupted by user — saving checkpoint...")
+        trainer.save_model(output_dir)
+        tokenizer.save_pretrained(output_dir)
+        raise
 
     print("\n💾 Saving...")
     trainer.save_model(output_dir)
@@ -328,6 +351,8 @@ def train():
         "lora_r": 8,
         "device": device,
         "format": "emotion | mood | style + <user>/<assistant>",
+        "model_type": "lora",
+        "style": STYLE if STYLE else "core",
     }
 
     with open(output_dir / "metadata.json", "w", encoding="utf-8") as f:
@@ -337,8 +362,117 @@ def train():
     print(f"📁 Saved to: {output_dir}")
 
 
+def _run_training_job(dataset: Dataset, output_dir: Path, style_name: str, probe_interval: int, seed: int):
+    # Create a minimal wrapper around the original training body so we can
+    # call it for core and for an optional style adapter.
+    global tokenizer
+    tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B")
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "right"
+
+    device_local = device
+    if device_local == "cuda":
+        model = AutoModelForCausalLM.from_pretrained(
+            "TinyLlama/TinyLlama-1.1B",
+            load_in_8bit=True,
+            device_map="auto",
+            trust_remote_code=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            "TinyLlama/TinyLlama-1.1B",
+            torch_dtype=torch.float32,
+            trust_remote_code=True,
+        )
+
+    print("✅ Model loaded")
+
+    print("\n🔧 Applying LoRA...")
+    lora = LoraConfig(
+        r=8,
+        lora_alpha=8,
+        lora_dropout=0.05,
+        bias="none",
+        task_type=TaskType.CAUSAL_LM,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+    )
+
+    model = get_peft_model(model, lora)
+    model.print_trainable_parameters()
+
+    if seed is not None:
+        random.seed(seed)
+        torch.manual_seed(seed)
+
+    tokenized = dataset.map(tokenize, batched=True, remove_columns=dataset.column_names)
+
+    args = TrainingArguments(
+        output_dir=str(output_dir),
+        num_train_epochs=1,
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=2,
+        learning_rate=2e-4,
+        warmup_steps=20,
+        weight_decay=0.01,
+        logging_steps=10,
+        save_steps=50,
+        save_total_limit=2,
+        fp16=device_local == "cuda",
+        optim="adamw_torch",
+        report_to="none",
+        remove_unused_columns=False,
+    )
+
+    steps, h, m, s = estimate_eta(len(tokenized), args)
+
+    print("\n⏳ Training estimate")
+    print(f"   Steps: {steps}")
+    print(f"   ETA: ~{h}h {m}m {s}s")
+
+    trainer = Trainer(
+        model=model,
+        args=args,
+        train_dataset=tokenized,
+        data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False),
+        callbacks=[ProbeCallback("Please respond in one short sentence: Hello!", probe_interval, tokenizer, device_local)],
+    )
+
+    print("\n🎯 Training...")
+    try:
+        trainer.train()
+    except KeyboardInterrupt:
+        print("\n⚠️ Training interrupted by user — saving checkpoint...")
+        trainer.save_model(output_dir)
+        tokenizer.save_pretrained(output_dir)
+        return False
+
+    print("\n💾 Saving...")
+    trainer.save_model(output_dir)
+    tokenizer.save_pretrained(output_dir)
+
+    metadata = {
+        "base_model": "TinyLlama/TinyLlama-1.1B",
+        "samples": len(dataset),
+        "lora_r": 8,
+        "device": device_local,
+        "format": "emotion | mood | style + <user>/<assistant>",
+        "model_type": "lora",
+        "style": style_name,
+    }
+
+    with open(output_dir / "metadata.json", "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
+
+    print("\n✅ Training complete")
+    print(f"📁 Saved to: {output_dir}")
+    return True
+
+
 if __name__ == "__main__":
     try:
         train()
     except KeyboardInterrupt:
-        print("\n⚠️ Training interrupted")
+        print("\n⚠️ Training interrupted by user")
+        sys.exit(130)
+

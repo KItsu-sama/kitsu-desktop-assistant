@@ -236,8 +236,17 @@ class KitsuApplication:
             enable_tts = self.config.get('enable_tts', False)
             continuous_decay = True if (self.mode == 'voice' or (enable_stt and enable_tts)) else False
 
+            # Model value can be a string (legacy) or a dict (new config format
+            # where model is an object like {"style": "sweet"}). Normalize to a
+            # string model name for LLM initialization.
+            model_cfg = self.config.get("model", "gemma:2b")
+            if isinstance(model_cfg, dict):
+                model_value = model_cfg.get("style") or model_cfg.get("name") or "gemma:2b"
+            else:
+                model_value = model_cfg
+
             self.kitsu = KitsuIntegrated(
-                model=self.config.get("model", "gemma:2b"),
+                model=model_value,
                 temperature=self.config.get("temperature", 0.8),
                 streaming=self.config.get('streaming', True),
                 continuous_decay=continuous_decay

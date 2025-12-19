@@ -15,7 +15,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 console = Console()
 
-def generate_dataset():
+def generate_dataset(): 
     """Generate comprehensive training dataset"""
     
     console.print("\n[bold magenta]🦊 KITSU DATASET GENERATOR[/bold magenta]\n")
@@ -52,16 +52,22 @@ def generate_dataset():
     console.print("\n🛡️  Applying safety filter...")
     filter = SafetyFilter()
     safe_dataset = filter.filter_dataset(raw_dataset)
-    
-    # Save dataset
-    output_path = Path("data/training/kitsu_personality.json")
+
+    console.print(f"  [green]✓[/green] {len(safe_dataset)} examples passed safety filter")
+
+    # Save filtered dataset as JSONL (messages + metadata only)
+    output_path = Path("data/training/kitsu_dataset.jsonl")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(safe_dataset, f, indent=2, ensure_ascii=False)
-    
+        for ex in safe_dataset:
+            # Write only messages + metadata; safety filter already cleared content
+            sample = {"messages": ex.get("messages", []), "metadata": ex.get("metadata", {})}
+            f.write(json.dumps(sample, ensure_ascii=False) + "\n")
+
     console.print(f"\n[green]✅ Dataset saved:[/green] {output_path}")
     console.print(f"   Total examples: {len(safe_dataset)}")
+
     
     # Statistics
     moods = {}

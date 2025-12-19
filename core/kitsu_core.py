@@ -108,6 +108,16 @@ class KitsuIntegrated:
                 streaming=self.streaming
             )
             log.info(f"✅ LLM initialized (templates: {self.templates_path})")
+
+            # Attach LoRA manager and discover adapters (meta-controller)
+            try:
+                from core.llm.lora_manager import LoRAManager
+                self.llm.lora_manager = LoRAManager(adapters_dir=Path('data/lora'), llm_interface=self.llm)
+                self.llm.lora_manager.discover_adapters()
+                self.llm.lora_manager.load_config()
+                log.info("✅ LoRA manager attached and adapters discovered")
+            except Exception as e:
+                log.warning(f"Could not attach LoRA manager: {e}")
             
         except Exception as e:
             log.error(f"❌ LLM initialization failed: {e}")
@@ -291,6 +301,18 @@ class KitsuIntegrated:
             if mode == ResponseMode.SILENT:
                 return "..."
 
+            # LoRA meta-controller: select and switch adapters based on frozen emotion
+            try:
+                state = self.emotion_engine.get_state_dict()
+                dominant = state.get('dominant_emotion')
+                if getattr(self.llm, 'lora_manager', None):
+                    candidate = self.llm.lora_manager.select_for_emotion(state)
+                    if candidate and candidate != self.llm.lora_manager.current_style:
+                        self.llm.lora_manager.switch_adapter(candidate)
+            except Exception:
+                # Non-fatal; continue without LoRA switching
+                pass
+
             
             # Get RL preferences ===================== fine tuning =================
             preferences = self.rl_engine.get_user_preferences() if self.rl_engine else None
@@ -303,6 +325,7 @@ class KitsuIntegrated:
                 style=style,
                 preferences=preferences,
                 mode=mode.value,
+                frozen_emotion=dominant,
                 stream=False
             )
 
@@ -466,7 +489,7 @@ class KitsuIntegrated:
             console.print(f"\n📊 Current State:")
             console.print(f"  Mood: {state['mood']}")
             console.print(f"  Style: {state['style']}")
-            console.print(f"  Mode (legacy): {state['current_mode']}")
+            console.print(f"  Mode [yellow](legacy)[/yellow]: {state['current_mode']}")
             console.print(f"  Dominant emotion: {state['dominant_emotion']}")
             console.print(f"  Hidden: {state['is_hidden']}")
             console.print(f"  Stack size: {state['stack_size']}")
@@ -609,6 +632,47 @@ class KitsuIntegrated:
         elif cmd == "/unhide":
             self.emotion_engine.unhide()
             print("👋 Kitsu is awake!")
+            return
+        
+
+        # LORA MANAGEMENT
+        # ============================================================
+
+        elif cmd == "/lora":
+            """Manage LoRA adapters"""
+            if not self.llm.lora_manager:
+                print("❌ LoRA manager not available")
+                return
+            
+            if len(parts) < 2:
+                # Show status
+                stats = self.llm.lora_manager.get_stats()
+                print(f"\n📊 LoRA Status:")
+                print(f"  Current style: {stats['current_style']}")
+                print(f"  Current adapter: {stats['current_adapter']}")
+                print(f"  Total switches: {stats['switch_count']}")
+                print(f"  Available: {', '.join(stats['available_styles'])}")
+                return
+            
+            sub = parts[1].lower()
+            
+            if sub == "switch" and len(parts) >= 3:
+                style = parts[2]
+                if self.llm.lora_manager.switch_adapter(style, force=True):
+                    print(f"✅ Switched to: {style}")
+                else:
+                    print(f"❌ Failed to switch to: {style}")
+            
+            elif sub == "list":
+                adapters = self.llm.lora_manager.list_adapters()
+                print("\n📦 Available LoRA Adapters:")
+                for style, info in adapters.items():
+                    current = "← current" if style == self.llm.lora_manager.current_style else ""
+                    print(f"  {style:10} → {info['name']} {current}")
+            
+            else:
+                print("Usage: /lora [list|switch <style>]")
+            
             return
         
 
@@ -887,6 +951,10 @@ class KitsuIntegrated:
         print("  /reset_module <name> - Hot-reload a module")
         print("  /dev_stats         - Show system statistics")
         print("  /first_meet        - Re-run the setup wizard (interactive or non-interactive)")
+        print("\n🔧 LoRA Management:")
+        print("  /lora              - Show LoRA status")
+        print("  /lora list         - List available adapters")
+        print("  /lora switch <style> - Switch to specific style")
         print("\n" + "="*60 + "\n")
         
     

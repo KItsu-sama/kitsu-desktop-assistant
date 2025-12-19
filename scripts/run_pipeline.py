@@ -14,6 +14,7 @@ from pathlib import Path
 import shutil
 
 PY = sys.executable
+ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = [
     Path("scripts/generate_training_data.py"),
     Path("scripts/finetune_lora.py"),
@@ -24,11 +25,23 @@ FALLBACK = Path("scripts/load_to_ollama_direct.py")
 
 
 def run_step(script: Path, args=None):
-    cmd = [PY, str(script)]
+    """
+    Run a script. If it's a module under the `scripts` package, run it with -m
+    from the project root so package imports (e.g., `import core`) work.
+    """
+    # Prefer module execution for scripts in the scripts/ package so the
+    # project root is on sys.path and imports like `import core` succeed.
+    if script.suffix == ".py" and script.parts and script.parts[0] == "scripts":
+        module = ".".join(script.with_suffix("").parts)
+        cmd = [PY, "-m", module]
+    else:
+        cmd = [PY, str(script)]
+
     if args:
         cmd.extend(args)
+
     print(f"\n🔷 Running: {script} \n   cmd: {cmd}")
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, cwd=str(ROOT))
     if result.returncode != 0:
         print(f"❌ Step failed: {script} (exit {result.returncode})")
         return False
@@ -37,6 +50,11 @@ def run_step(script: Path, args=None):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--style', type=str, default=None, help='Optional style to pass to finetune step')
+    args = parser.parse_args()
+
     # 1 - generate training data
     if not SCRIPTS[0].exists():
         print(f"⚠️ Missing script: {SCRIPTS[0]} - skipping generation step")
@@ -49,7 +67,10 @@ def main():
     if not finetune_script.exists():
         print(f"⚠️ Missing finetune script: {finetune_script}")
         return 1
-    if not run_step(finetune_script):
+    finetune_args = []
+    if args.style:
+        finetune_args.extend(['--style', args.style])
+    if not run_step(finetune_script, args=finetune_args):
         return 1
 
     # 3 - load to Ollama (detect availability first)

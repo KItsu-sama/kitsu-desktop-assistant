@@ -430,31 +430,24 @@ class MemoryManager:
             emotion: Associated emotion (optional)
         """
         with self._lock:
-
-            # Add emotional pressure
-            if self.kitsu_self:
-                current_emotion = getattr(self.kitsu_self, "emotion", None)
-                if current_emotion and emotion == current_emotion:
-                    entry["score"] += 0.1
-
             # Validation
             if not text or not text.strip():
                 log.warning("Attempted to remember empty text")
                 return
-            
+
             # Normalize role
             if role not in ["user", "kitsu", "self", "assistant", "system"]:
                 log.warning(f"Invalid role: {role}, using 'system'")
                 role = "system"
-            
+
             original_text = text
-            
+
             # Process through plugins (in priority order)
             for plugin in self.plugins:
                 modified_text = plugin.on_remember(role, text, emotion)
                 if modified_text is not None:
                     text = modified_text
-            
+
             # Create memory entry
             entry = {
                 "role": role,
@@ -462,28 +455,32 @@ class MemoryManager:
                 "emotion": emotion or "neutral",
                 "timestamp": time.time(),
 
+                # Affective vector for training/use by other systems
+                "affective_vector": {},
 
                 "score": 0.0,
                 "uses": 0,
                 "type": "SHORT"   # SHORT | EPISODIC | LONG
             }
 
-            entry["score"] = compute_score(entry, time.time())
+            # Small default affective vector
+            try:
+                entry["affective_vector"] = {entry["emotion"]: 1.0}
+            except Exception:
+                entry["affective_vector"] = {"neutral": 1.0}
 
-            # Track if modified by plugins
-            if text != original_text:
-                entry["original_text"] = original_text
-                entry["modified_by"] = "plugins"
-            
-            # Add to memory
-            self.sessions.append(entry)
-            
-            # Auto-save check
-            if self.config.auto_save:
-                elapsed = time.time() - self._last_save_time
-                if elapsed > self.config.save_interval:
-                    self.save()
-    
+            # Add emotional pressure
+            try:
+                if self.kitsu_self:
+                    current_emotion = getattr(self.kitsu_self, "emotion", None)
+                    if current_emotion and entry.get("emotion") == current_emotion:
+                        # small boost for self-relevant memories
+                        entry["score"] += 0.1
+            except Exception:
+                pass
+
+            now = time.time()
+            entry["score"] = compute_score(entry, now, current_emotion=getattr(self.kitsu_self, 'emotion', None))
 
     def recall(self, context_length: int = 5) -> List[Dict[str, Any]]:
         now = time.time()
@@ -512,7 +509,32 @@ class MemoryManager:
 
             return sessions
 
-    
+    def export_for_training(self, n: int = 100) -> list:
+        """Export top-n memories as minimal training samples.
+
+        Returns a list of dicts partial-compatible with finetune input.
+        Each item contains 'emotion','mood','style','memory','user','assistant'.
+        """
+        now = time.time()
+        with self._lock:
+            sessions = list(self.sessions)
+            for m in sessions:
+                m["score"] = compute_score(m, now, current_emotion=getattr(self.kitsu_self, 'emotion', None))
+            sessions.sort(key=lambda m: m.get("score", 0), reverse=True)
+            top = sessions[:max(0, int(n))]
+
+            items = []
+            for s in top:
+                items.append({
+                    "emotion": s.get("emotion", "neutral"),
+                    "mood": "behave",
+                    "style": "chaotic",
+                    "memory": [],
+                    "user": s["text"] if s.get("role") == "user" else "",
+                    "assistant": s["text"] if s.get("role") == "kitsu" else "",
+                })
+            return items
+
     def format_context(self, context_length: int = 5) -> str:
         """
         Format memories as conversation context

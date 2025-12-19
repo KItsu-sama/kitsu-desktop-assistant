@@ -14,8 +14,10 @@ import threading
 import datetime
 from typing import Dict, Any, Optional, AsyncGenerator
 
+from core.llm.lora_manager import LoRAManager
+
 from core.llm.ollama_adapter import OllamaAdapter
-from core.llm.prompt_builder import PromptBuilder, MinimalPromptBuilder
+from core.llm.prompt_builder import PromptBuilder
 from core.fallback_manager import FallbackManager
 from core.llm.lora_router import LoRaRouter
 
@@ -51,7 +53,11 @@ class LLMInterface:
     """
     Main interface for LLM interactions
     
-    NEW: Automatically detects character models and uses minimal prompts!
+    NEW: Automatically detects character models and uses machine-readable control
+    prompts for Neuro-sama style character models. Character prompts are emitted
+    as a compact <kitsu.control> header with no persona, instructions, or
+    natural-language system text. LoRA selections and sampling params are
+    controlled via emotion/mood/style.
     """
     
     def __init__(
@@ -64,8 +70,15 @@ class LLMInterface:
         streaming: bool = True,
         config: Optional[LLMConfig] = None,
         memory: Optional[Any] = None,
-        emotion_engine: Optional[Any] = None  # NEW: Need emotion engine for minimal prompts
+        emotion_engine: Optional[Any] = None,  # NEW: Need emotion engine for minimal prompts
+        lora_manager: Optional[Any] = None
     ):
+        # Model may be provided as a string or a dict (legacy vs new config).
+        # Normalize to a simple string name here so downstream code expecting
+        # a string does not error when passed a dict.
+        if isinstance(model, dict):
+            model = model.get("style") or model.get("name") or "gemma:2b"
+
         self.model = model
         self.temperature = temperature
         self.emotion_engine = emotion_engine  # Store emotion engine reference
@@ -79,18 +92,40 @@ class LLMInterface:
             temperature=self.temperature,
             streaming=streaming
         )
+
+        # Initialize LoRA manager (allow injection)
+        try:
+            if lora_manager is not None:
+                self.lora_manager = lora_manager
+            else:
+                # only create if not injected
+                self.lora_manager = getattr(self, 'lora_manager', None) or LoRAManager()
+                log.info("✅ LoRA manager initialized")
+
+                # Auto-load default adapter if configured
+                config_style = getattr(config, 'default_style', None)
+                if config_style and config_style in self.lora_manager.adapters:
+                    self.lora_manager.switch_adapter(config_style)
+                    log.info(f"Loaded default LoRA: {config_style}")
+
+        except Exception as e:
+            log.warning(f"⚠️  LoRA manager unavailable: {e}")
+            self.lora_manager = None
+
+
         
         # Detect if using character model
         self.is_character_model = self._detect_character_model(model)
         
         if self.is_character_model:
-            log.info("🦊 CHARACTER MODEL DETECTED - Using minimal prompts")
-            # Use minimal prompt builder
-            self.prompt_builder = MinimalPromptBuilder(memory_manager=memory_manager)
+            log.info("🦊 CHARACTER MODEL DETECTED - Using machine-readable control prompts")
+            # For Neuro-sama-style character models we DO NOT use a natural-language
+            # prompt builder. Prompts are machine-readable control headers only.
+            self.prompt_builder = None
             self.minimal_mode = True
         else:
             log.info("📝 Standard model - Using full prompts")
-            # Use full prompt builder
+            # Use full prompt builder for standard models
             self.prompt_builder = PromptBuilder(
                 character_context=character_context,
                 memory_manager=memory_manager,
@@ -113,25 +148,268 @@ class LLMInterface:
         self._check_availability()
         
         log.info(f"LLMInterface initialized with {self.model}")
-    
-    def _detect_character_model(self, model_name: str) -> bool:
+
+    # ==================== generate_response ====================
+
+    async def generate_response(
+        self,
+        user_input: str,
+        mood: str = "behave",
+        style: str = "chaotic",
+        stream: bool = False,
+        custom_prompt: Optional[str] = None,
+        is_greeting: bool = False,
+        user_title: str = "",
+        preferences: Optional[Dict[str, Any]] = None,
+        user_permissions: Optional[Dict[str, Any]] = None,
+        last_topic: Optional[str] = None,
+        continuation_state: Optional[ContinuationState] = None,
+    ) -> str:
         """
-        Detect if model is a character model
+        Generate conversational response with automatic retry and fallback
         
+        NOW WITH EMOTION-DRIVEN LORA SWITCHING!
+        """
+        
+        # === LoRA SWITCHING (NEW) ===
+        if self.lora_manager and self.emotion_engine:
+            try:
+                # Get current emotion state
+                emotion_state = self.emotion_engine.get_state_dict()
+                
+                # Select best LoRA for current state
+                target_style = self.lora_manager.select_for_emotion(emotion_state)
+                
+                # Switch if needed (fast, no model reload)
+                if target_style:
+                    switched = self.lora_manager.switch_adapter(target_style)
+                    if switched:
+                        log.debug(f"🦊 LoRA switched to: {target_style}")
+            
+            except Exception as e:
+                log.debug(f"LoRA switching failed: {e}")
+        
+        # === REST OF METHOD (UNCHANGED) ===
+        
+        # Freeze emotion once per response
+        emotion = (
+            self.emotion_engine.get_current_emotion()
+            if self.emotion_engine
+            else "neutral"
+        )
+        
+        # Apply meta-controller
+        mood, style, length_hint = self._apply_meta_controller(mood, style, preferences)
+        user_permissions = user_permissions or {}
+        
+        if continuation_state is None:
+            continuation_state = ContinuationState(0)
+        
+        for attempt in range(self.config.max_retries):
+            try:
+                # Check availability
+                if not self.is_available:
+                    log.warning(f"LLM unavailable, attempt {attempt + 1}/{self.config.max_retries}")
+                    
+                    if await self._try_restart_ollama():
+                        continue
+                    
+                    if self.config.fallback_on_failure:
+                        return self._get_fallback_response(mood, style)
+                    
+                    await asyncio.sleep(self.config.retry_delay)
+                    continue
+                
+                # Build prompt
+                prompt = self._build_prompt(
+                    user_input,
+                    mood,
+                    style,
+                    emotion=emotion,
+                    custom_prompt=custom_prompt,
+                    is_greeting=is_greeting,
+                    user_title=user_title,
+                    length_hint=length_hint,
+                    preferences=preferences,
+                )
+                
+                # Generation options (now depend on mood/style/emotion)
+                options = self._get_generation_options(mood, style, emotion, length_hint)
+                
+                # Generate
+                if stream:
+                    chunks = []
+                    async for chunk in self.stream_response(prompt, **options):
+                        chunks.append(chunk)
+                    raw_response = "".join(chunks)
+                else:
+                    raw_response = await asyncio.to_thread(
+                        self.adapter.generate,
+                        prompt,
+                        **options
+                    )
+                
+                # Action handling (existing code)
+                try:
+                    parsed = parse_action_from_text(raw_response)
+                except Exception as e:
+                    log.warning(f"Action parser exception: {e}")
+                    parsed = {"ok": False, "error": "parser exception"}
+                
+                self.last_action_decision = None
+                
+                if not parsed.get("ok"):
+                    log.debug(f"Action parse failed: {parsed.get('error')}")
+                    return self._sanitize_final_response(raw_response)
+                
+                action = parsed.get("action")
+                
+                # Continue marker detection
+                if action is None:
+                    lines = [ln.strip() for ln in raw_response.splitlines() if ln.strip()]
+                    continue_lines = [ln for ln in lines if ln == "<continue>"]
+                    if len(continue_lines) == 1:
+                        from core.meta.action_parser import Action as ActionClass
+                        action = ActionClass(
+                            kind="continue",
+                            payload={"reason": None},
+                            raw="<continue>"
+                        )
+                    elif len(continue_lines) > 1:
+                        log.warning("Multiple <continue> markers found")
+                        return self._sanitize_final_response(raw_response)
+                
+                if action is None:
+                    return self._sanitize_final_response(raw_response)
+                
+                # Meta-controller decision
+                emotion_state = {"intensity": 0.0}
+                try:
+                    if self.emotion_engine and hasattr(self.emotion_engine, "get_current_intensity"):
+                        emotion_state["intensity"] = float(
+                            self.emotion_engine.get_current_intensity()
+                        )
+                except Exception:
+                    pass
+                
+                decision = self.meta_controller.decide_and_handle_action(
+                    action,
+                    user_permissions=user_permissions,
+                    last_topic=last_topic,
+                    continuation_state=continuation_state,
+                    emotion_state=emotion_state,
+                )
+                
+                self.last_action_decision = decision
+                
+                # Handle decision
+                if decision.get("requires_confirmation"):
+                    log.info("Action requires confirmation")
+                    return self._sanitize_final_response(raw_response)
+                
+                if not decision.get("approved") or not callable(decision.get("execute")):
+                    log.info("Action denied or no executor")
+                    return self._sanitize_final_response(raw_response)
+                
+                # Execute action
+                try:
+                    exec_fn = decision.get("execute")
+                    exec_result = exec_fn()
+                except Exception as e:
+                    log.warning(f"Action execution failed: {e}")
+                    return self._sanitize_final_response(raw_response)
+                
+                # Build tool result
+                tool_result = {"action": action.kind, "result": exec_result}
+                
+                # Update continuation state
+                if action.kind == "continue" and isinstance(exec_result, dict):
+                    if exec_result.get("allowed"):
+                        continuation_state.count = exec_result.get(
+                            "new_count",
+                            continuation_state.count
+                        )
+                
+                # Single continuation
+                try:
+                    cont_prompt = (
+                        prompt + 
+                        "\n[INTERNAL] Tool result (machine-only): " + 
+                        json.dumps(tool_result)
+                    )
+                    cont_resp = await asyncio.to_thread(
+                        self.adapter.generate,
+                        cont_prompt,
+                        **options
+                    )
+                    final_raw = cont_resp
+                except Exception as e:
+                    log.warning(f"Continuation generation failed: {e}")
+                    final_raw = raw_response
+                
+                return self._sanitize_final_response(final_raw)
+            
+            except Exception as e:
+                log.error(f"Generation failed (attempt {attempt + 1}): {e}")
+                self.is_available = False
+                
+                if attempt == self.config.max_retries - 1:
+                    if self.config.fallback_on_failure:
+                        log.warning("All retries exhausted, using fallback")
+                        return self._get_fallback_response(mood, style)
+                    else:
+                        raise
+                
+                await asyncio.sleep(self.config.retry_delay)
+        
+        if self.config.fallback_on_failure:
+            return self._get_fallback_response(mood, style)
+        else:
+            raise Exception("LLM generation failed after all retries")
+
+
+    
+    def _detect_character_model(self, model_name: Optional[Any]) -> bool:
+        """
+        Detect if model is a character model. Accepts string or dict-like values.
+
         Character models are identified by:
         - Name contains "kitsu:character"
         - Name contains ":character"
         - Metadata file exists with model_type=character
         """
-        # Check name patterns
-        if "kitsu:character" in model_name.lower():
-            return True
-        if ":character" in model_name.lower():
-            return True
-        
-        # Check for metadata file
-        model_dir = Path("data/models") / model_name.replace(":", "_")
-        metadata_file = model_dir / "metadata.json"
+        try:
+            if isinstance(model_name, dict):
+                # try common keys
+                model_name = model_name.get("style") or model_name.get("name") or model_name.get("model")
+
+            if not model_name:
+                return False
+
+            model_name_str = str(model_name)
+
+            # Check name patterns
+            if "kitsu:character" in model_name_str.lower():
+                return True
+            if ":character" in model_name_str.lower():
+                return True
+
+            # Check for metadata file
+            model_dir = Path("data/models") / model_name_str.replace(":", "_")
+            metadata_file = model_dir / "metadata.json"
+
+            if metadata_file.exists():
+                try:
+                    with open(metadata_file, "r") as f:
+                        metadata = json.load(f)
+                        if metadata.get("model_type") == "character":
+                            return True
+                except Exception:
+                    pass
+
+            return False
+        except Exception:
+            return False
         
         if metadata_file.exists():
             try:
@@ -221,34 +499,63 @@ class LLMInterface:
         emotion: Optional[str] = None,
         custom_prompt: Optional[str] = None,
         is_greeting: bool = False,
-        user_title: str = ""
+        user_title: str = "",
+        length_hint: Optional[Any] = None,
+        preferences: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Build prompt based on model type
-        
-        Character models get minimal prompts
-        Standard models get full prompts
+
+        For character models we emit a compact, machine-readable control block and
+        the raw user input. No persona, no instructions, no natural-language
+        system text.
         """
         if custom_prompt:
             return custom_prompt
-        
+
         if self.is_character_model:
-            # MINIMAL PROMPT for character model - use frozen emotion if provided
+            # Machine-readable control header (deterministic, non-natural language)
             if emotion is None:
                 emotion = "neutral"
-            # For greetings, add greeting context in natural language (no 'System:' header)
-            if is_greeting and user_title:
-                safe_title = self._sanitize_user_title(user_title)
-                greeting_context = f"{safe_title} just woke you up. Greet them warmly and naturally."
-                user_input = greeting_context if not user_input else f"{greeting_context}\n{user_input}"
 
-            return self.prompt_builder.build_prompt(
-                user_input=user_input,
-                emotion=emotion,
-                mood=mood,
-                style=style,
-                memory_limit=3
+            # Normalize length hint for the control block
+            lh = length_hint if length_hint is not None else "medium"
+            if isinstance(lh, int):
+                # numeric token count
+                length_field = str(lh)
+            else:
+                length_field = str(lh)
+
+            control = (
+                "<kitsu.control>\n"
+                f"emotion={emotion}\n"
+                f"mood={mood}\n"
+                f"style={style}\n"
+                f"length={length_field}\n"
+                "</kitsu.control>\n\n"
             )
+
+            # Memory injection only when explicitly requested (avoid per-turn injection)
+            memory_block = ""
+            if preferences and preferences.get("inject_memory") and self.memory:
+                try:
+                    # Attempt a couple of common memory APIs; be tolerant of missing methods.
+                    if hasattr(self.memory, "get_memory_for_prompt"):
+                        mem = self.memory.get_memory_for_prompt()
+                    elif hasattr(self.memory, "summarize"):
+                        mem = self.memory.summarize()
+                    elif hasattr(self.memory, "get_recent_memory"):
+                        mem = self.memory.get_recent_memory()
+                    else:
+                        mem = None
+                except Exception:
+                    mem = None
+
+                if mem:
+                    # Insert as a separate machine-only block
+                    memory_block = f"\n<kitsu.memory>{mem}</kitsu.memory>\n\n"
+
+            return control + memory_block + (user_input or "")
         else:
             # FULL PROMPT for standard model
             if is_greeting and user_title:
@@ -276,6 +583,9 @@ class LLMInterface:
         user_permissions: Optional[Dict[str, Any]] = None,
         last_topic: Optional[str] = None,
         continuation_state: Optional[ContinuationState] = None,
+        mode: Optional[str] = None,
+        frozen_emotion: Optional[str] = None,
+        **kwargs,
     ) -> str:
         """
         Generate conversational response with automatic retry and fallback
@@ -298,11 +608,14 @@ class LLMInterface:
         # Ignore preferences parameter (for compatibility with old code)
         
         # Freeze emotion once per response (do not re-query during generation)
-        emotion = (
-            self.emotion_engine.get_current_emotion()
-            if self.emotion_engine
-            else "neutral"
-        )
+        if frozen_emotion is not None:
+            emotion = frozen_emotion
+        else:
+            emotion = (
+                self.emotion_engine.get_current_emotion()
+                if self.emotion_engine
+                else "neutral"
+            )
 
         # Apply lightweight meta-controller to validate/normalize mood/style and length hints
         mood, style, length_hint = self._apply_meta_controller(mood, style, preferences)
@@ -325,7 +638,7 @@ class LLMInterface:
                     await asyncio.sleep(self.config.retry_delay)
                     continue
                 
-                # Build prompt (automatically chooses minimal or full)
+                # Build prompt (automatically chooses control header for character models or full prompt for standard models)
                 prompt = self._build_prompt(
                     user_input,
                     mood,
@@ -333,17 +646,32 @@ class LLMInterface:
                     emotion=emotion,
                     custom_prompt=custom_prompt,
                     is_greeting=is_greeting,
-                    user_title=user_title
+                    user_title=user_title,
+                    length_hint=length_hint,
+                    preferences=preferences,
                 )
-                
-                # Log prompt type for debugging
+
+                # Log prompt type for debugging (do not print user input)
                 if self.is_character_model:
-                    log.debug(f"📝 Minimal prompt ({len(prompt)} chars): {prompt[:100]}...")
+                    log.debug(f"📝 Control prompt ({len(prompt)} chars)")
                 else:
                     log.debug(f"📝 Full prompt ({len(prompt)} chars)")
-                
-                # Adjust generation options based on style and length hint
-                options = self._get_generation_options(style, length_hint)
+
+                # LoRA switching should consider mood/style/emotion as well
+                if self.lora_manager:
+                    try:
+                        state = self.emotion_engine.get_state_dict() if self.emotion_engine else {}
+                        state.update({"mood": mood, "style": style, "emotion": emotion})
+                        target_style = self.lora_manager.select_for_emotion(state)
+                        if target_style:
+                            switched = self.lora_manager.switch_adapter(target_style)
+                            if switched:
+                                log.debug(f"🦊 LoRA switched to: {target_style}")
+                    except Exception as e:
+                        log.debug(f"LoRA switching failed: {e}")
+
+                # Adjust generation options based on mood/style/emotion and length hint
+                options = self._get_generation_options(mood, style, emotion, length_hint)
                 
                 if stream:
                     # Stream response (collect chunks internally, then handle actions deterministically)
@@ -582,10 +910,11 @@ class LLMInterface:
             self.is_available = False
             return fallback_result
     
-    def _get_generation_options(self, style: str, length_hint: Optional[Any] = None) -> Dict[str, Any]:
-        """Return a small, efficient options dict tuned for style and a length hint.
+    def _get_generation_options(self, mood: str, style: str, emotion: Optional[str] = None, length_hint: Optional[Any] = None) -> Dict[str, Any]:
+        """Return options tuned deterministically by mood/style/emotion and a length hint.
 
-        Keeps defaults low to preserve performance on low-spec machines.
+        Emotion/mood/style affect both sampling temperature and token budget. Keep
+        defaults conservative for low-spec machines.
         """
         def _length_to_num(hint: Optional[Any]) -> int:
             if hint is None:
@@ -598,19 +927,45 @@ class LLMInterface:
                 return 256
             return 128  # medium/default
 
+        # Base token budget
         num_predict = _length_to_num(length_hint)
 
+        # Base temperature from configured temperature, adjusted by style/mood
+        temp = float(self.temperature)
+
+        # Style-based temperature nudges
+        if style == "silent":
+            temp = min(temp, 0.25)
+            num_predict = min(64, num_predict)
+        elif style == "chaotic":
+            temp = max(temp, 0.9)
+            num_predict = max(128, num_predict)
+        elif style == "cold":
+            temp = min(max(temp * 0.6, 0.2), 0.5)
+            num_predict = min(128, num_predict)
+        elif style == "sweet":
+            temp = min(max(temp * 0.8, 0.4), 0.8)
+
+        # Mood influences
+        if mood == "mean":
+            temp = max(0.2, temp * 0.8)
+        elif mood == "flirty":
+            temp = min(0.95, temp * 1.1)
+
+        # Emotion may further tweak sampling (intensity or valence)
+        try:
+            if isinstance(emotion, dict) and "intensity" in emotion:
+                intensity = float(emotion.get("intensity", 0.0))
+                # more intense -> slightly higher temp
+                temp = min(1.0, temp + 0.15 * intensity)
+        except Exception:
+            pass
+
         options = {
-            "temperature": self.temperature,
-            "num_predict": num_predict,
+            "temperature": float(round(temp, 3)),
+            "num_predict": int(num_predict),
             "stop": ["\nUser:", "\n###", "\nRESPONSE:"]
         }
-
-        # Slight style-based nudges (no heavy logic)
-        if style == "silent":
-            options["num_predict"] = min(64, options["num_predict"]) 
-        elif style == "chaotic":
-            options["num_predict"] = max(128, options["num_predict"]) 
 
         return options
 
@@ -693,6 +1048,23 @@ class LLMInterface:
 
         return text.strip()
     
+    def get_lora_status(self) -> Dict[str, Any]:
+        """Get current LoRA adapter status"""
+        if not self.lora_manager:
+            return {"available": False}
+        
+        try:
+            stats = self.lora_manager.get_stats()
+            return {
+                "available": True,
+                "current_style": stats["current_style"],
+                "current_adapter": stats["current_adapter"],
+                "total_switches": stats["switch_count"],
+                "available_styles": stats["available_styles"]
+            }
+        except Exception as e:
+            return {"available": False, "error": str(e)}
+    
     def _parse_json_response(self, response: str) -> Dict[str, Any]:
         """Parse JSON from LLM response"""
         try:
@@ -719,17 +1091,24 @@ class LLMInterface:
     
     def get_status(self) -> Dict[str, Any]:
         """Get current LLM status"""
-        return {
+        status = {
             "available": self.is_available,
             "model": self.model,
             "is_character_model": self.is_character_model,
-            "prompt_mode": "minimal" if self.is_character_model else "full",
+            "prompt_mode": "control" if self.is_character_model else "full",
             "temperature": self.temperature,
             "auto_restart": self.config.auto_restart,
             "fallback_enabled": self.config.fallback_on_failure,
-            "max_retries": self.config.max_retries
-            , "active_lora_style": getattr(self, "active_lora_style", None)
+            "max_retries": self.config.max_retries,
+            "active_lora_style": getattr(self, "active_lora_style", None)
         }
+        
+        # Add LoRA status
+        if self.lora_manager:
+            status["lora"] = self.get_lora_status()
+        
+        return status
+
 
     def register_lora(self, style: str, path: str) -> None:
         """Register a LoRA adapter path for a style at runtime.
@@ -768,10 +1147,10 @@ class LLMInterface:
         self.model = model_name
         self.is_character_model = True
         
-        # Replace prompt builder
-        self.prompt_builder = MinimalPromptBuilder(memory_manager=self.memory)
-        
-        # Update adapter
+        # Character models use machine-readable control prompts; no natural-language prompt builder
+        self.prompt_builder = None
+
+        # Update adapter (keep streaming behavior)
         self.adapter = OllamaAdapter(
             model=self.model,
             temperature=self.temperature,

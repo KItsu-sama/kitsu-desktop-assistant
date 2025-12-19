@@ -73,13 +73,20 @@ class SafetyFilter:
         return True
     
     def filter_dataset(self, dataset: List[Dict]) -> List[Dict]:
-        """Filter entire dataset"""
+        """Filter entire dataset. Uses assistant message when available."""
         filtered = []
         removed = []
         
         for example in dataset:
-            output = example.get("output", "")
-            if self.is_safe(output):
+            # prefer assistant content inside messages
+            assistant_text = ""
+            msgs = example.get("messages")
+            if isinstance(msgs, list) and len(msgs) >= 2 and isinstance(msgs[1], dict):
+                assistant_text = msgs[1].get("content", "")
+            else:
+                assistant_text = example.get("output", "")
+
+            if self.is_safe(assistant_text):
                 filtered.append(example)
             else:
                 removed.append(example)

@@ -9,37 +9,24 @@ def create_training_sample(
     emotion: str,
     user_input: str,
     assistant_response: str,
-    memory: List[str] = None
-) -> Dict:
+    memory: list = None,
+) -> dict:
+    """Return a single conversation sample with metadata.
+
+    Format:
+    {
+        "messages": [{"role":"user","content":...}, {"role":"assistant","content":...}],
+        "metadata": {"mood": mode, "style": style, "emotion": emotion, "memory": memory or []}
+    }
     """
-    Create a training sample with metadata tags
-    This is the format your model will learn
-    """
-    # Build context header
-    context_parts = [
-        f"emotion: {emotion}",
-        f"mood: {mode}",
-        f"style: {style}"
-    ]
-    
-    if memory:
-        context_parts.append(f"memory: {', '.join(memory[:3])}")
-    
-    context = " | ".join(context_parts)
-    
     return {
-        "context": context,
         "messages": [
             {"role": "user", "content": user_input},
-            {"role": "assistant", "content": assistant_response}
+            {"role": "assistant", "content": assistant_response},
         ],
-        "metadata": {
-            "emotion": emotion,
-            "mood": mode,
-            "style": style,
-            "memory": memory or []
-        }
+        "metadata": {"mood": mode, "style": style, "emotion": emotion, "memory": memory or []},
     }
+
 
 def create_expanded_dataset() -> List[Dict]:
     """dataset with metadata"""
@@ -75,11 +62,11 @@ def create_expanded_dataset() -> List[Dict]:
     
     for mode, style, emotion, user, assistant in greeting_scenarios:
         dataset.append(create_training_sample(
-            mode=mode,
-            style=style,
-            emotion=emotion,
-            user_input=user,
-            assistant_response=assistant
+            mode,
+            style,
+            emotion,
+            user,
+            assistant,
         ))
     
     # ==== CONVERSATIONS (emotion-aware) ====
@@ -142,12 +129,12 @@ def create_expanded_dataset() -> List[Dict]:
             mode, style, emotion, user, assistant, memory = scenario
         
         dataset.append(create_training_sample(
-            mode=mode,
-            style=style,
-            emotion=emotion,
-            user_input=user,
-            assistant_response=assistant,
-            memory=memory
+            mode,
+            style,
+            emotion,
+            user,
+            assistant,
+            memory,
         ))
     
     # ==== GENERATE VARIATIONS (200+ examples) ====
@@ -174,13 +161,7 @@ def create_expanded_dataset() -> List[Dict]:
         # Modify response based on mode/style
         response = _adjust_response(base_response, mode, style, emotion)
         
-        dataset.append(create_training_sample(
-            mode=mode,
-            style=style,
-            emotion=emotion,
-            user_input=user,
-            assistant_response=response
-        ))
+        dataset.append(create_training_sample(mode, style, emotion, user, response))
     
     return dataset
 

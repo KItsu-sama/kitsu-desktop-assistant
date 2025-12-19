@@ -109,6 +109,7 @@ kitsu/
 │   └── /llm/                                 # 🤖 LLM Integration
 │   │   ├── __init__.py
 │   │   ├── llm_interface.py
+│   │   ├── lora_manager.py
 │   │   ├── ollama_adapter.py
 │   │   ├── api_adapter.py
 │   │   ├── prompt_builder.py 
@@ -344,6 +345,7 @@ kitsu/
 │   ├── safety_filter.py             
 │   ├── run_kitsu.py                 # (for Ollama)
 │   ├── export_to_gguf.py
+│   ├── train_all_styles.py
 │   ├── quick_start.sh               
 │   ├── quick_start.bat
 │   ├── load_to_ollama_direct
@@ -615,6 +617,18 @@ Meta-Controller (approve / deny / confirm)
 Sanitizer (strip machine-only)
    ↓
 User-visible output
+
+
+Emotion Engine → LoRA Manager → LLM Interface → Ollama/HF
+     ↓                ↓              ↓
+  [mood/style]   [select adapter] [generate]
+
+
+
+python -m scripts.generate_training_data --num-samples 2 --seed 1
+
+python -m scripts.generate_training_data --num-samples 100
+
 
 
 =Best greeting= : Hello~! Brother dear, it's been ages since I've spoken with someone as... mechanical as yourself! How's life in the land of ones and zeros treating you? Still stuck in a sea of code, I presume?
