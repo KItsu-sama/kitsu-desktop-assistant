@@ -1,18 +1,19 @@
 {
-  "name": "",
-  "nickname": "",
-  "refer_title": "",
-  "gender": "unknown",
-  "status": "user",
+  "name": "Zino",
+  "nickname": "Zi",
+  "refer_title": "Master",
+  "gender": "male",
+  "status": "developer",
   "relationship": {
     "trust_level": 0.5,
     "affinity": 0.5,
     "lore_tag": "stranger"
   },
   "permissions": {
-    "admin": false,
-    "dev_console": false,
+    "admin": true,
+    "dev_console": true,
     "memory_clear": true,
     "state_change": true
-  }
+  },
+  "completed_setup": true
 }

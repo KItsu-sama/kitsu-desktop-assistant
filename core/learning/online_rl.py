@@ -222,27 +222,36 @@ class OnlineRLEngine:
         return self.user_preferences.copy()
     
     def save(self):
-        """Save learning data"""
+        """Save learning observations in a curator-only location.
+
+        Important: these observations may contain raw response text but are
+        never used directly for training. Any downstream process MUST perform
+        sanitization and human curation before exposing these samples to the
+        trainer (trainer.is_sanitized check).
+        """
         data = {
             "response_memory": list(self.response_memory),
             "response_patterns": self.response_patterns,
-            "user_preferences": self.user_preferences
+            "user_preferences": self.user_preferences,
+            "curation_required": True
         }
-        
-        with open(self.save_path, "w") as f:
+
+        # Write to a clearly-named file so it can't be mistaken for a training dataset
+        safe_path = self.save_path.with_suffix(self.save_path.suffix + ".observations.json")
+        with open(safe_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-    
+
     def load(self):
         """Load existing learning data"""
         if self.save_path.exists():
             try:
-                with open(self.save_path, "r") as f:
+                with open(self.save_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                
+
                 self.response_memory = deque(data.get("response_memory", []), maxlen=1000)
                 self.response_patterns = data.get("response_patterns", {})
                 self.user_preferences = data.get("user_preferences", self.user_preferences)
-                
-                log.info(f"Loaded {len(self.response_memory)} past interactions")
+
+                log.info(f"Loaded {len(self.response_memory)} past interactions (observations)")
             except Exception as e:
                 log.warning(f"Failed to load RL data: {e}")

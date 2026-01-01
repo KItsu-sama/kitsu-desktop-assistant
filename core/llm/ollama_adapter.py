@@ -22,19 +22,67 @@ except Exception:
     _HAS_LANGCHAIN_OLLAMA = False
 
 
-def _run_ollama_cli(model_name: str, prompt: str, timeout: Optional[int] = None) -> str:
+def _run_ollama_cli(model_name: str, prompt: str, options: Optional[dict] = None, timeout: Optional[int] = None) -> str:
     """
-    CLI fallback with proper UTF-8 handling
+    CLI fallback with proper UTF-8 handling.
+
+    Supports a limited set of options passed via the Ollama CLI flags (when
+    available). If the CLI does not support a given flag, we at minimum ensure
+    a reasonable timeout is used to avoid infinite hangs.
     """
     try:
+        cmd = ["ollama", "run", model_name]
+        # Append prompt as a single argument (safer quoting)
+        cmd.append(prompt)
+
+        # Map some options to CLI flags when present
+        if options:
+            num_predict = options.get("num_predict") or options.get("max_new_tokens")
+            if num_predict is not None:
+                # Newer Ollama CLI uses kebab-case flags ("--num-predict").
+                # Use the kebab-case flag and fall back to running without the flag
+                # if the CLI reports it as unknown.
+                cmd += ["--num-predict", str(int(num_predict))]
+            temp = options.get("temperature")
+            if temp is not None:
+                cmd += ["--temperature", str(float(temp))]
+            top_p = options.get("top_p")
+            if top_p is not None:
+                cmd += ["--top-p", str(float(top_p))]
+            top_k = options.get("top_k")
+            if top_k is not None:
+                cmd += ["--top-k", str(int(top_k))]
+
+        # Derive a sensible timeout if none provided (avoid unbounded runs)
+        if timeout is None:
+            timeout =  max(10, int((options.get("num_predict", 128) // 4))) if options else 30
+
         proc = subprocess.run(
-            ["ollama", "run", model_name, prompt],
+            cmd,
             capture_output=True,
             text=True,
             encoding="utf-8",
-            errors="replace",  # Replace undecodable bytes
+            errors="replace",
             timeout=timeout
         )
+
+        # Retry without num-predict flag if CLI reports it as unknown
+        if proc.returncode != 0 and proc.stderr and "unknown flag" in proc.stderr.lower() and ("--num_predict" in proc.stderr or "--num-predict" in proc.stderr):
+            # Rebuild command without num_predict flags
+            cmd_no_num = [c for c in cmd if c not in ("--num-predict", "--num_predict") and not (c.startswith("--num-predict=") or c.startswith("--num_predict="))]
+            try:
+                proc2 = subprocess.run(
+                    cmd_no_num,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout
+                )
+                proc = proc2
+            except subprocess.TimeoutExpired:
+                raise RuntimeError("ollama CLI timed out")
+
         if proc.returncode != 0:
             raise RuntimeError(f"ollama CLI error: {proc.stderr.strip()}")
         return proc.stdout.strip()
@@ -56,7 +104,7 @@ class OllamaAdapter:
         self,
         model: str = "gemma:2b",
         temperature: float = 0.8,
-        streaming: bool = False,
+        streaming: bool = True,
         timeout: Optional[int] = None,
         callback_handler: Optional[Any] = None
     ):
@@ -102,8 +150,8 @@ class OllamaAdapter:
             except Exception as e:
                 log.warning(f"Langchain generation failed: {e}, trying CLI")
         
-        # Fallback to CLI
-        return _run_ollama_cli(self.model, prompt, timeout=self.timeout)
+        # Fallback to CLI and pass normalized options so token limits/temperature are applied
+        return _run_ollama_cli(self.model, prompt, options=ollama_options, timeout=self.timeout)
     
     def stream(self, prompt: str, **options) -> Generator[str, None, None]:
         """
@@ -129,7 +177,7 @@ class OllamaAdapter:
             except Exception as e:
                 log.warning(f"Langchain streaming failed: {e}")
         
-        # Fallback: non-streaming response
+        # Fallback: non-streaming response (pass options through)
         result = self.generate(prompt, **options)
         yield result
     

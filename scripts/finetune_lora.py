@@ -1,4 +1,4 @@
-# scripts/finetune_lora_cpu.py
+# scripts/finetune_lora.py
 """
 Clean CPU-friendly LoRA training for Kitsu
 - Single stable chat format
@@ -6,13 +6,20 @@ Clean CPU-friendly LoRA training for Kitsu
 - No padding poisoning
 - Real ETA estimation
 - Safe for CPU / GT 730
+Key fixes:
+- Consistent chat format with proper EOS tokens
+- Correct model name (TinyLlama-1.1B-Chat-v1.0)
+- Proper label masking for <assistant> responses only
+- No padding poisoning
+- Improved probe callback
+- Better training arguments for convergence
 """
 
 import argparse
 import json
 import math
-import time
 import random
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -31,7 +38,6 @@ from peft import (
     get_peft_model,
     prepare_model_for_kbit_training,
     TaskType,
-    PeftModel,
 )
 
 # =========================
@@ -52,6 +58,9 @@ if device == "cuda":
 else:
     print("   ⚠️ CPU mode (slow but stable)")
 
+# Global tokenizer
+tokenizer = None
+
 # =========================
 # Dataset loading
 # =========================
@@ -70,7 +79,7 @@ def load_training_data(path: Path, style_filter: Optional[str] = None) -> Datase
             item = json.loads(ln)
             meta = item.get("metadata", {})
             mood = meta.get("mood", "behave")
-            style = meta.get("style", "calm")
+            style = meta.get("style", "chaotic")
             emotion = meta.get("emotion", "neutral")
 
             if style_filter and style != style_filter:
@@ -97,13 +106,17 @@ def load_training_data(path: Path, style_filter: Optional[str] = None) -> Datase
                 if any(f in combined_lower for f in forbidden):
                     continue
 
+                # Build training text in consistent format
                 text = (
                     f"emotion: {emotion} | mood: {mood} | style: {style}\n"
-                    f"<user>\n{user}\n\n"
-                    f"<assistant>\n{assistant}"
+                    f"User: {user}\n"
+                    f"Kitsu: {assistant}"
                 )
 
                 rows.append({"text": text})
+
+    if not rows:
+        raise ValueError(f"No valid training samples found in {path}")
 
     return Dataset.from_list(rows)
 
@@ -120,18 +133,19 @@ def tokenize(batch):
         truncation=True,
         max_length=256,
         padding=False,
+        add_special_tokens=True,
     )
 
     labels = []
     for i, (text, ids) in enumerate(zip(texts, enc["input_ids"])):
-        # Everything before <assistant> is ignored
-        assistant_idx = text.find("<assistant>")
-        if assistant_idx == -1:
+        # Everything before "Kitsu:" is ignored
+        kitsu_idx = text.find("Kitsu:")
+        if kitsu_idx == -1:
             labels.append([-100] * len(ids))
             continue
 
         prefix = tokenizer(
-            text[:assistant_idx], add_special_tokens=False
+            text[:kitsu_idx + 6], add_special_tokens=False  # Include "Kitsu:"
         )["input_ids"]
         lbl = [-100] * len(prefix) + ids[len(prefix):]
 
@@ -148,11 +162,13 @@ def tokenize(batch):
 
         # Recompute label slice to match potentially updated ids
         lbl = lbl[: len(ids)]
+        # Ensure last token is NOT masked (so model learns to predict EOS)
+        if lbl[-1] == -100:
+            lbl[-1] = ids[-1]
         labels.append(lbl)
 
     enc["labels"] = labels
     return enc
-
 
 
 # =========================
@@ -179,11 +195,52 @@ def estimate_eta(num_samples, args):
 
 
 # =========================
+# Probe callback
+# =========================
+
+
+class ProbeCallback(TrainerCallback):
+    def __init__(self, prompt: str, interval: int, tokenizer, device: str):
+        self.prompt = prompt
+        self.interval = interval
+        self.tokenizer = tokenizer
+        self.device = device
+
+    def on_step_end(self, args, state, control, **kwargs):
+        model = kwargs.get("model")
+        if model is None or self.interval <= 0:
+            return
+        step = int(state.global_step)
+        if step % self.interval != 0:
+            return
+
+        try:
+            model.eval()
+            with torch.no_grad():
+                tokens = self.tokenizer(self.prompt, return_tensors="pt").to(self.device)
+                out = model.generate(
+                    **tokens,
+                    max_new_tokens=32,
+                    do_sample=True,
+                    temperature=0.8,
+                    pad_token_id=self.tokenizer.eos_token_id
+                )
+                text = self.tokenizer.decode(out[0], skip_special_tokens=True)
+                print(f"\n[PROBE step={step}] {text}\n")
+        except Exception as e:
+            print(f"[PROBE] failed: {e}")
+        finally:
+            model.train()
+
+
+# =========================
 # Training
 # =========================
 
 
 def train():
+    global tokenizer
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--style", type=str, default=None, help="Optional single style to train (chaotic/sweet/cold/silent)")
     parser.add_argument("--min-samples", type=int, default=400, help="Minimum samples required to start a training job")
@@ -215,11 +272,15 @@ def train():
 
     print("\n📥 Loading model...")
     # Use the non-chat base model to avoid chat-template behavior during fine-tuning
-    model_name = "TinyLlama/TinyLlama-1.1B"
+    model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 
-    global tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name,
+        local_files_only=False,
+        trust_remote_code=True
+    )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
     if device == "cuda":
@@ -242,7 +303,7 @@ def train():
     print("\n🔧 Applying LoRA...")
     lora = LoraConfig(
         r=8,
-        lora_alpha=8,
+        lora_alpha=16,  # Increased for better learning
         lora_dropout=0.05,
         bias="none",
         task_type=TaskType.CAUSAL_LM,
@@ -257,58 +318,24 @@ def train():
         random.seed(SEED)
         torch.manual_seed(SEED)
 
-    # =========================
-    # Probe callback for early overfit detection (lightweight, training-only)
-    # =========================
-    PROBE_PROMPT = "Please respond in one short sentence: Hello!"
-
-    class ProbeCallback(TrainerCallback):
-        def __init__(self, prompt: str, interval: int, tokenizer, device: str):
-            self.prompt = prompt
-            self.interval = interval
-            self.tokenizer = tokenizer
-            self.device = device
-
-        def on_step_end(self, args, state, control, **kwargs):
-            # kwargs may contain the model
-            model = kwargs.get("model")
-            if model is None or self.interval <= 0:
-                return
-            step = int(state.global_step)
-            if step % self.interval != 0:
-                return
-
-            # Run a tiny generation probe without affecting gradients
-            try:
-                model.eval()
-                with torch.no_grad():
-                    tokens = self.tokenizer(self.prompt, return_tensors="pt").to(self.device)
-                    out = model.generate(**tokens, max_new_tokens=24)
-                    text = self.tokenizer.decode(out[0], skip_special_tokens=True)
-                    print(f"[PROBE] step={step} probe_out={text}")
-            except Exception as e:
-                print(f"[PROBE] failed: {e}")
-            finally:
-                model.train()
-
     print("\n📝 Tokenizing...")
-    tokenized = dataset.map(
+    tokenized = all_ds.map(
         tokenize,
         batched=True,
-        remove_columns=dataset.column_names,
+        remove_columns=all_ds.column_names,
     )
 
     args = TrainingArguments(
-        output_dir=str(output_dir),
-        num_train_epochs=1,
+        output_dir=str(core_output),
+        num_train_epochs=3,  # More epochs for better learning
         per_device_train_batch_size=1,
-        gradient_accumulation_steps=2,
+        gradient_accumulation_steps=4,  # Larger effective batch
         learning_rate=2e-4,
-        warmup_steps=20,
+        warmup_steps=50,
         weight_decay=0.01,
         logging_steps=10,
-        save_steps=50,
-        save_total_limit=2,
+        save_steps=100,
+        save_total_limit=3,
         fp16=device == "cuda",
         optim="adamw_torch",
         report_to="none",
@@ -322,6 +349,9 @@ def train():
     print(f"   ETA: ~{h}h {m}m {s}s")
     print("   (Estimate stabilizes after a few steps)")
 
+    # Probe prompt
+    probe_prompt = "emotion: happy | mood: behave | style: chaotic\nUser: Hi!\nKitsu:"
+
     trainer = Trainer(
         model=model,
         args=args,
@@ -329,7 +359,7 @@ def train():
         data_collator=DataCollatorForLanguageModeling(
             tokenizer=tokenizer, mlm=False
         ),
-        callbacks=[ProbeCallback(PROBE_PROMPT, PROBE_INTERVAL, tokenizer, device)],
+        callbacks=[ProbeCallback(probe_prompt, PROBE_INTERVAL, tokenizer, device)],
     )
 
     print("\n🎯 Training...")
@@ -337,136 +367,30 @@ def train():
         trainer.train()
     except KeyboardInterrupt:
         print("\n⚠️ Training interrupted by user — saving checkpoint...")
-        trainer.save_model(output_dir)
-        tokenizer.save_pretrained(output_dir)
+        trainer.save_model(core_output)
+        tokenizer.save_pretrained(core_output)
         raise
 
     print("\n💾 Saving...")
-    trainer.save_model(output_dir)
-    tokenizer.save_pretrained(output_dir)
+    trainer.save_model(core_output)
+    tokenizer.save_pretrained(core_output)
 
     metadata = {
         "base_model": model_name,
-        "samples": len(dataset),
+        "samples": len(all_ds),
         "lora_r": 8,
+        "lora_alpha": 16,
         "device": device,
-        "format": "emotion | mood | style + <user>/<assistant>",
+        "format": "emotion | mood | style + User:/Kitsu:",
         "model_type": "lora",
-        "style": STYLE if STYLE else "core",
+        "style": "core",
     }
 
-    with open(output_dir / "metadata.json", "w", encoding="utf-8") as f:
+    with open(core_output / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
     print("\n✅ Training complete")
-    print(f"📁 Saved to: {output_dir}")
-
-
-def _run_training_job(dataset: Dataset, output_dir: Path, style_name: str, probe_interval: int, seed: int):
-    # Create a minimal wrapper around the original training body so we can
-    # call it for core and for an optional style adapter.
-    global tokenizer
-    tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B")
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "right"
-
-    device_local = device
-    if device_local == "cuda":
-        model = AutoModelForCausalLM.from_pretrained(
-            "TinyLlama/TinyLlama-1.1B",
-            load_in_8bit=True,
-            device_map="auto",
-            trust_remote_code=True,
-        )
-        model = prepare_model_for_kbit_training(model)
-    else:
-        model = AutoModelForCausalLM.from_pretrained(
-            "TinyLlama/TinyLlama-1.1B",
-            torch_dtype=torch.float32,
-            trust_remote_code=True,
-        )
-
-    print("✅ Model loaded")
-
-    print("\n🔧 Applying LoRA...")
-    lora = LoraConfig(
-        r=8,
-        lora_alpha=8,
-        lora_dropout=0.05,
-        bias="none",
-        task_type=TaskType.CAUSAL_LM,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-    )
-
-    model = get_peft_model(model, lora)
-    model.print_trainable_parameters()
-
-    if seed is not None:
-        random.seed(seed)
-        torch.manual_seed(seed)
-
-    tokenized = dataset.map(tokenize, batched=True, remove_columns=dataset.column_names)
-
-    args = TrainingArguments(
-        output_dir=str(output_dir),
-        num_train_epochs=1,
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=2,
-        learning_rate=2e-4,
-        warmup_steps=20,
-        weight_decay=0.01,
-        logging_steps=10,
-        save_steps=50,
-        save_total_limit=2,
-        fp16=device_local == "cuda",
-        optim="adamw_torch",
-        report_to="none",
-        remove_unused_columns=False,
-    )
-
-    steps, h, m, s = estimate_eta(len(tokenized), args)
-
-    print("\n⏳ Training estimate")
-    print(f"   Steps: {steps}")
-    print(f"   ETA: ~{h}h {m}m {s}s")
-
-    trainer = Trainer(
-        model=model,
-        args=args,
-        train_dataset=tokenized,
-        data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False),
-        callbacks=[ProbeCallback("Please respond in one short sentence: Hello!", probe_interval, tokenizer, device_local)],
-    )
-
-    print("\n🎯 Training...")
-    try:
-        trainer.train()
-    except KeyboardInterrupt:
-        print("\n⚠️ Training interrupted by user — saving checkpoint...")
-        trainer.save_model(output_dir)
-        tokenizer.save_pretrained(output_dir)
-        return False
-
-    print("\n💾 Saving...")
-    trainer.save_model(output_dir)
-    tokenizer.save_pretrained(output_dir)
-
-    metadata = {
-        "base_model": "TinyLlama/TinyLlama-1.1B",
-        "samples": len(dataset),
-        "lora_r": 8,
-        "device": device_local,
-        "format": "emotion | mood | style + <user>/<assistant>",
-        "model_type": "lora",
-        "style": style_name,
-    }
-
-    with open(output_dir / "metadata.json", "w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2)
-
-    print("\n✅ Training complete")
-    print(f"📁 Saved to: {output_dir}")
-    return True
+    print(f"📁 Saved to: {core_output}")
 
 
 if __name__ == "__main__":
@@ -475,4 +399,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n⚠️ Training interrupted by user")
         sys.exit(130)
-
+    except Exception as e:
+        print(f"\n❌ Failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

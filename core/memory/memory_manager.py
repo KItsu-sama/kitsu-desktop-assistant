@@ -9,7 +9,9 @@ import json
 import random
 import logging
 import time
+import re
 import threading
+import asyncio
 from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Protocol
@@ -30,7 +32,7 @@ class MemoryConfig:
         self,
         max_history: int = 200,
         auto_save: bool = True,
-        save_interval: int = 300,
+        save_interval: int = 10,
         compression_enabled: bool = True
     ):
         self.max_history = max_history
@@ -216,8 +218,73 @@ class EmotionalMemoryPlugin:
                 "emotion": "neutral",
                 "compressed_count": len(compressed)
             })
-        
         return preserved
+
+class GroundingMemoryPlugin:
+    """
+    Enforce grounded factual memory and ignore metaphorical / mythological claims.
+
+    Rules:
+    - Drop memories that contain mythological/self-origin claims
+    - Replace origin claims in assistant messages with the canonical creator phrase
+    - Ensure no metaphors are stored as facts (best-effort heuristics)
+    """
+    def __init__(self):
+        self.priority = 5  # run early so problematic text is filtered
+        self._myth_patterns = [
+            r"\bspirit\b",
+            r"\bnine tails\b",
+            r"\bfox-spirit\b",
+            r"\bborn\b",
+            r"\bsummon(?:ed)?\b",
+            r"\bdigital womb\b",
+        ]
+
+    def on_remember(self, role: str, text: str, emotion: Optional[str] = None) -> Optional[str]:
+        if not text or not isinstance(text, str):
+            return None
+
+        low = text.lower()
+
+        # If contains mythological language, drop it (do not store as fact)
+        for p in self._myth_patterns:
+            if re.search(p, low):
+                return None
+
+        # If the assistant claims an origin, normalize to canonical phrase
+        if re.search(r"\b(i was created|i was born|i was summoned|i am created|i am created by)\b", low):
+            return "I was created by Zino."
+
+        # Basic metaphor heuristics: "like a" or "as if" used in declarative statements
+        if re.search(r"\blike a\b|\bas if\b", low):
+            # avoid storing metaphorical text as a factual memory
+            return None
+
+        return text
+    
+    def on_recall(
+        self,
+        sessions: List[Dict[str, Any]],
+        context_length: int
+    ) -> List[Dict[str, Any]]:
+        """Pass through - no modification needed on recall"""
+        return sessions
+    
+    def on_save(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Pass through - no additional data to save"""
+        return data
+    
+    def on_load(self, data: Dict[str, Any]) -> None:
+        """Pass through - no plugin state to restore"""
+        pass
+    
+    def on_optimize(
+        self,
+        sessions: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Pass through - no optimization needed"""
+        return sessions
+
 
 
 class SleepOptimizationPlugin:
@@ -375,6 +442,11 @@ class MemoryManager:
         self.add_plugin(PlayfulForgetfulnessPlugin(self.kitsu_self))
         self.add_plugin(EmotionalMemoryPlugin())
         self.add_plugin(SleepOptimizationPlugin())
+        # Grounding plugin to prevent mythological/metaphorical facts from persisting
+        try:
+            self.add_plugin(GroundingMemoryPlugin())
+        except Exception:
+            log.exception("Failed to initialize GroundingMemoryPlugin")
     
     # =========================================================================
     # Plugin Management
@@ -390,13 +462,12 @@ class MemoryManager:
 
     def _mark_dirty(self):
         """Mark the manager as needing save; triggers save if auto_save set."""
-        # For simplicity: if autosave is enabled, call save(); otherwise do nothing yet
-        if getattr(self.config, 'auto_save', False):
-            try:
-                self.save()
-            except Exception:
-                log.exception("Failed to autosave memory on mark dirty")
-    
+        if not self.config.auto_save:
+            return
+        now = time.time()
+        if now - self._last_save_time >= self.config.save_interval:
+            self.save()
+
     def remove_plugin(self, plugin_class):
         """Remove a plugin by class"""
         with self._lock:
@@ -481,6 +552,9 @@ class MemoryManager:
 
             now = time.time()
             entry["score"] = compute_score(entry, now, current_emotion=getattr(self.kitsu_self, 'emotion', None))
+        self.sessions.append(entry)
+        self._mark_dirty()
+
 
     def recall(self, context_length: int = 5) -> List[Dict[str, Any]]:
         now = time.time()
@@ -628,14 +702,35 @@ class MemoryManager:
                 # Ensure directory exists
                 self.memory_path.parent.mkdir(parents=True, exist_ok=True)
                 
-                # Atomic write (write to temp, then rename)
+                # Atomic write (write to temp, then rename) with Windows-safe retry/backups
                 temp_path = self.memory_path.with_suffix('.tmp')
                 temp_path.write_text(
                     json.dumps(data, indent=2, ensure_ascii=False),
                     encoding="utf-8"
                 )
-                temp_path.replace(self.memory_path)
-                
+                try:
+                    temp_path.replace(self.memory_path)
+                except PermissionError:
+                    # Possible file lock on Windows; attempt a safe fallback
+                    try:
+                        if self.memory_path.exists():
+                            try:
+                                self.memory_path.unlink()
+                            except PermissionError:
+                                # If we can't unlink, attempt rename to backup
+                                backup = self.memory_path.with_suffix('.bak')
+                                try:
+                                    self.memory_path.replace(backup)
+                                except Exception:
+                                    log.warning("Memory file locked and backup rename failed; leaving existing file in place")
+                        temp_path.replace(self.memory_path)
+                    except Exception as e:
+                        log.error(f"Failed to atomically replace memory file after PermissionError: {e}")
+                        raise
+                except Exception as e:
+                    log.error(f"Failed to replace temp memory file: {e}")
+                    raise
+
                 self._last_save_time = time.time()
                 log.info(f"Memory saved: {len(self.sessions)} entries")
                 
@@ -647,20 +742,25 @@ class MemoryManager:
         with self._lock:
             try:
                 if self.memory_path.exists():
-                    data = json.loads(
-                        self.memory_path.read_text(encoding="utf-8")
-                    )
-                    
+                    raw = self.memory_path.read_text(encoding="utf-8")
+                    if raw.strip() == "":
+                        data = {"sessions": [], "state": {}}
+                    else:
+                        data = json.loads(raw)
+
                     self.sessions = deque(
                         data.get("sessions", []),
                         maxlen=self.config.max_history
                     )
                     self.state = data.get("state", {})
-                    
+
                     # Process through plugins
                     for plugin in self.plugins:
-                        plugin.on_load(data)
-                    
+                        try:
+                            plugin.on_load(data)
+                        except Exception:
+                            log.exception("Memory plugin on_load failed: %s", plugin.__class__.__name__)
+
                     log.info(f"Memory loaded: {len(self.sessions)} entries")
                 else:
                     log.info("No existing memory file, starting fresh")
@@ -787,6 +887,16 @@ class MemoryManager:
 # =============================================================================
 # extra
 # =============================================================================
+
+    async def save_async_aio(self):
+        """Save memory to disk asynchronously using aiofiles (preferred)"""
+        # Use the synchronous save() path to avoid dual save implementations and races.
+        # This delegates to the single save() implementation using a thread to avoid blocking.
+        try:
+            await asyncio.to_thread(self.save)
+        except Exception as e:
+            log.error(f"Failed to save memory async via threaded save(): {e}")
+
 
     def set_user_info(self, **updates) -> None:
         """Update user information safely with nested merge."""
@@ -946,6 +1056,9 @@ class MemoryManager:
                     cfg_path = Path("data/config/user_profile.json")
                     current = self._load_json_safe(cfg_path)
                     current.update(profile_updates)
+                    # Ensure completed_setup flag persists
+                    if current.get("completed_setup") is None:
+                        current["completed_setup"] = True
                     self._save_json_safe(cfg_path, current)
                 except Exception:
                     log.exception("Failed to save user profile to config")
@@ -955,6 +1068,76 @@ class MemoryManager:
                     self._update_config_permissions(permission_updates)
                 except Exception:
                     log.exception("Failed to save permissions to config")
+
+    def ensure_user_profile_exists(self) -> None:
+        """Ensure that a usable user_profile exists on disk and in memory state.
+
+        Repairs missing or partial user profile data by merging defaults and
+        existing config files. This function is safe to call at startup,
+        after /first_meet, or on config reload.
+        """
+        with self._lock:
+            cfg_path = Path("data/config/user_profile.json")
+            default_path = Path("data/default/user_profile.json")
+
+            existing = self._load_json_safe(cfg_path)
+            defaults = self._load_json_safe(default_path)
+
+            # Start with defaults, merge existing on top, preserve runtime user state
+            merged = defaults.copy()
+            merged.update(existing)
+
+            # Ensure required keys exist
+            required_keys = {
+                "name": "User",
+                "nickname": merged.get("name", "User"),
+                "refer_title": merged.get("nickname", merged.get("name", "User")),
+                "gender": "unknown",
+                "status": "user",
+                "permissions": {
+                    "admin": False,
+                    "dev_console": False,
+                    "memory_clear": True,
+                    "state_change": True
+                }
+            }
+
+            for k, v in required_keys.items():
+                if k not in merged or merged.get(k) is None:
+                    merged[k] = v
+
+            # Ensure completed_setup flag exists (False if not present)
+            if "completed_setup" not in merged:
+                merged["completed_setup"] = False
+
+            # Write back only if changed
+            if merged != existing:
+                self._save_json_safe(cfg_path, merged)
+                log.info("Repaired missing user_profile with defaults")
+
+    def create_checkpoint(self, user_input: str, assistant_output: str, mood: str = "behave", style: str = "chaotic", lora_stack: list = None) -> None:
+        """Create a lightweight response checkpoint usable for restoration.
+
+        Checkpoints are stored in `data/memory/checkpoints.jsonl` as JSONL entries.
+        They are short, restorable, and pruneable by a curator process.
+        """
+        try:
+            cp_path = Path("data/memory/checkpoints.jsonl")
+            cp_path.parent.mkdir(parents=True, exist_ok=True)
+            entry = {
+                "ts": time.time(),
+                "user_input": user_input,
+                "assistant_output": assistant_output,
+                "mood": mood,
+                "style": style,
+                "lora_stack": list(lora_stack or []),
+            }
+            with cp_path.open("a", encoding="utf-8") as f:
+                import json
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            log.info("Checkpoint created")
+        except Exception as e:
+            log.warning(f"Failed to create checkpoint: {e}")
 
     def reset_user_info(self, what: Optional[str] = None) -> None:
         """Reset user profile or permissions to defaults.

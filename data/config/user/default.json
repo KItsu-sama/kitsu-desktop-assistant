@@ -1,0 +1,33 @@
+{
+  "name": "User",
+  "nickname": "",
+  "refer_title": "User",
+  "status": "User",
+  "gender": "Unknown",
+  "relationship": {
+    "role": "User",
+    "trust_level": 0.1,
+    "affinity": 1.0,
+    "lore_tag": ""
+  },
+  "permissions": {
+    "is_admin": false,
+    "can_shutdown": false,
+    "can_edit_memory": false,
+    "can_trigger_modes": false,
+    "can_toggle_avatar": false
+  },
+  "preferences": {
+    "preferred_kitsu_style": "neutral",
+    "preferred_kitsu_mood": "neutral",
+    "avatar_enabled": true,
+    "voice_output": true,
+    "emotion_reactions": true
+  },
+  "stats": {
+    "first_seen": "2025-12-26T16:01:19.645586",
+    "last_seen": "2025-12-26T16:01:19.645586",
+    "messages_sent": 0
+  },
+  "creator_fingerprint": null
+}

@@ -449,6 +449,7 @@ async def main():
         import traceback
         traceback.print_exc()
         sys.exit(1)
+    return
 
 
 if __name__ == "__main__":

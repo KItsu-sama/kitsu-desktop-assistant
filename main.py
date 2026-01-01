@@ -169,7 +169,7 @@ async def stop_all_background_tasks():
 class GracefulShutdown:
     """Handle graceful shutdown on signals"""
     
-    def __init__(self, kitsu: KitsuIntegrated):
+    def __init__(self, kitsu = KitsuIntegrated):
         self.kitsu = kitsu
         self.shutdown_event = asyncio.Event()
     
@@ -304,10 +304,10 @@ class KitsuApplication:
         """Auto-save memory periodically"""
         try:
             while True:
-                await asyncio.sleep(300)  # 5 minutes
+                await asyncio.sleep(1)   
                 if self.kitsu.memory:
                     try:
-                        self.kitsu.memory.save()
+                        await self.kitsu.memory.save_async_aio()
                         log.debug("Memory auto-saved")
                     except Exception as e:
                         log.error(f"Memory auto-save failed: {e}")
@@ -386,9 +386,8 @@ class KitsuApplication:
 # Entry Point
 # =============================================================================
 
-async def async_main():
+async def async_main(run_setup: bool = False, no_greet: bool = False, auto_train: bool = False, model_swicht: bool = False) -> int:
     """Async main entry point"""
-async def async_main(run_setup: bool = False, no_greet: bool = False):
     # Optionally run setup wizard first
     if run_setup:
         try:
@@ -402,13 +401,29 @@ async def async_main(run_setup: bool = False, no_greet: bool = False):
     config = load_config()
     if no_greet:
         config['greet_on_startup'] = False
-    
+
+    if model_swicht:
+        from core.llm.llm_interface import LLMInterface
+        lmf = LLMInterface()
+        lmf.switch_to_character_model()
+
     # Create application
     app = KitsuApplication(config)
     
     try:
         # Initialize
         await app.initialize()
+        
+        # Enable auto-train if flag is set
+        if auto_train:
+            if app.kitsu and hasattr(app.kitsu, 'dev_router') and app.kitsu.dev_router:
+                trainer = app.kitsu.dev_router.trainer
+                trainer.auto_train_enabled = True
+                log.info("✅ Auto-train enabled via --auto-train flag")
+                console.print("[green]✅ Auto-train enabled[/green]")
+            else:
+                log.warning("⚠️  Could not enable auto-train (dev_router not available)")
+
         
         # Run
         await app.run()
@@ -432,12 +447,19 @@ def main():
     try:
         # Parse CLI args
         parser = argparse.ArgumentParser(description='Kitsu AI')
+        parser.add_argument('--model-swicht', action='store_true', help='Switch model on startup') # default to kitsu character model = kitsu:character
         parser.add_argument('--setup', action='store_true', help='Run setup wizard before starting')
         parser.add_argument('--no-greet', action='store_true', help='Disable greeting on startup (override config)')
+        parser.add_argument('--auto-train', action='store_true', help='Enable automatic fine-tuning after /train or /rate')
         args = parser.parse_args()
 
         # Run async main
-        exit_code = asyncio.run(async_main(run_setup=args.setup, no_greet=args.no_greet))
+        exit_code = asyncio.run(async_main(
+            run_setup=args.setup, 
+            no_greet=args.no_greet,
+            auto_train=args.auto_train,
+            model_swicht=args.model_swicht
+        ))
         return exit_code
     except KeyboardInterrupt:
         log.info("\n\n👋 Kitsu: Bye bye! See you later! 🦊\n")

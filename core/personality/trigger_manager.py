@@ -1,4 +1,4 @@
-# FILE 2: core/personality/trigger_manager.py (Your Code - Cleaned)
+# core/personality/trigger_manager.py
 # =============================================================================
 """
 Manages triggers with cooldowns and durations
@@ -80,3 +80,82 @@ class TriggerManager:
     def get_trigger_info(self, trigger_name: str) -> Optional[Dict[str, Any]]:
         """Get full trigger info"""
         return self.triggers.get(trigger_name)
+
+    def add_trigger(self, trigger_name: str, trigger_def: Dict[str, Any]) -> bool:
+        """Add or update a trigger and persist to disk.
+
+        `trigger_def` should be a dict with optional keys: cooldown (float),
+        emotions (list of dict{name,intensity,duration}), modifiers (dict).
+        Missing fields are defaulted conservatively.
+        """
+        try:
+            if not trigger_name:
+                return False
+            # normalize and apply defaults
+            td = dict(trigger_def)
+            cooldown = float(td.get('cooldown', 5.0))
+            emotions = td.get('emotions') or []
+            normalized_emotions = []
+            for e in emotions:
+                if isinstance(e, dict):
+                    name = e.get('name')
+                    if not name:
+                        continue
+                    intensity = float(e.get('intensity', 0.5))
+                    duration = float(e.get('duration', 10.0))
+                    normalized_emotions.append({
+                        'name': name,
+                        'intensity': intensity,
+                        'duration': duration
+                    })
+                elif isinstance(e, (list, tuple)) and len(e) >= 1:
+                    name = e[0]
+                    intensity = float(e[1]) if len(e) > 1 else 0.5
+                    duration = float(e[2]) if len(e) > 2 else 10.0
+                    normalized_emotions.append({'name': name, 'intensity': intensity, 'duration': duration})
+
+            modifiers = {}
+            for k, v in (td.get('modifiers') or {}).items():
+                try:
+                    modifiers[k] = float(v)
+                except Exception:
+                    continue
+
+            # Build persisted definition
+            to_write = {
+                'cooldown': cooldown,
+                'emotions': normalized_emotions,
+                'modifiers': modifiers
+            }
+
+            # Load full file and update
+            if not self.triggers_path.exists():
+                base = {'triggers': {}}
+            else:
+                try:
+                    base = json.loads(self.triggers_path.read_text(encoding='utf-8'))
+                except Exception:
+                    base = {'triggers': {}}
+
+            if 'triggers' not in base or not isinstance(base['triggers'], dict):
+                base['triggers'] = {}
+
+            base['triggers'][trigger_name] = to_write
+
+            # Persist atomically
+            tmp = self.triggers_path.with_suffix('.tmp')
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(base, f, indent=2)
+            tmp.replace(self.triggers_path)
+
+            # Update in-memory and return
+            self.triggers[trigger_name] = to_write
+            log.info(f"Trigger added/updated: {trigger_name}")
+            return True
+        except Exception as e:
+            log.exception(f"Failed to add trigger: {e}")
+            return False
+
+    def list_triggers(self) -> Dict[str, Any]:
+        """Return current triggers mapping."""
+        return self.triggers.copy()

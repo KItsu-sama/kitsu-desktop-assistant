@@ -17,7 +17,7 @@
   "memory": {
     "max_history": 200,
     "auto_save": true,
-    "save_interval": 300,
+    "save_interval": 10,
     "compression_enabled": true
   }
 

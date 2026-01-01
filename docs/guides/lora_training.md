@@ -1,4 +1,4 @@
-# LoRA Training (Automated Overnight Pipeline)
+# LoRA Training (Automated Auto Pipeline)
 
 This guide explains how to generate training data and run unattended LoRA training for Kitsu.
 

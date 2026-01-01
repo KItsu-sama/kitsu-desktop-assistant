@@ -2,14 +2,28 @@
 """
 Load trained model directly to Ollama
 No GGUF conversion needed - Ollama handles it!
+Thin CLI wrapper for model loading that delegates to scripts.ollama.
+This wrapper preserves the previous CLI interface while using a single
+canonical implementation in `scripts.ollama`.
 """
 
+import argparse
 import json
 import subprocess
 import sys
 from pathlib import Path
 from rich.console import Console
 from rich.prompt import Confirm
+
+# Ensure project root is on sys.path when running this file directly
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+try:
+    from scripts import ollama
+except ImportError:
+    ollama = None  # Fallback to local implementations
 
 console = Console()
 
@@ -39,7 +53,7 @@ def find_model_dir():
     
     console.print("[red]❌ No trained model found![/red]")
     console.print("\n[yellow]💡 Train a model first:[/yellow]")
-    console.print("   python scripts/finetune_lora_cpu.py")
+    console.print("   python scripts/finetune_lora.py")
     return None
 
 def merge_lora_if_needed(model_dir: Path):
@@ -99,22 +113,18 @@ def merge_lora_if_needed(model_dir: Path):
         return None
 
 def create_modelfile(model_dir: Path):
-    """Create Ollama Modelfile"""
-    console.print("\n[cyan]📝 Creating Modelfile...[/cyan]")
-    
-    # Ollama can import from local paths
-    modelfile_content = f"""# Kitsu Character Model
-# Import from local PyTorch model
-FROM {model_dir.absolute()}
+    """Create Ollama Modelfile automatically (always overwrite)"""
+    console.print("\n[cyan]📝 Creating Modelfile (auto)...[/cyan]")
 
-# Model parameters optimized for character consistency
+    modelfile_content = f"""# Kitsu Character Model
+FROM {model_dir.resolve()}
+
 PARAMETER temperature 0.8
 PARAMETER top_p 0.9
 PARAMETER top_k 40
 PARAMETER repeat_penalty 1.1
 PARAMETER num_ctx 2048
 
-# Minimal chat template (personality is in weights!)
 TEMPLATE \"\"\"{{{{ if .System }}}}
 <|system|>
 {{{{ .System }}}}
@@ -124,24 +134,24 @@ TEMPLATE \"\"\"{{{{ if .System }}}}
 <|assistant|>
 \"\"\"
 
-# Stop tokens
 PARAMETER stop "<|user|>"
 PARAMETER stop "<|assistant|>"
 PARAMETER stop "<|system|>"
 PARAMETER stop "</s>"
 """
-    
+
     modelfile_path = Path("data/models/Modelfile.kitsu")
-    modelfile_path.write_text(modelfile_content)
-    
-    console.print(f"[green]✅ Modelfile created:[/green] {modelfile_path}")
+    modelfile_path.parent.mkdir(parents=True, exist_ok=True)
+    modelfile_path.write_text(modelfile_content, encoding="utf-8")
+
+    console.print(f"[green]✅ Modelfile ready:[/green] {modelfile_path}")
     return modelfile_path
 
 def load_to_ollama(modelfile_path: Path):
     """Load model into Ollama"""
     console.print("\n[cyan]📦 Loading model to Ollama...[/cyan]")
     
-    model_name = "kitsu:character"
+    model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
     
     try:
         # Check if Ollama is running
@@ -198,7 +208,7 @@ def test_model():
     
     try:
         result = subprocess.run(
-            ["ollama", "run", "kitsu:character", test_prompt],
+            ["ollama", "run", "TinyLlama/TinyLlama-1.1B-Chat-v1.0", test_prompt],
             capture_output=True,
             text=True,
             encoding='utf-8',
@@ -217,12 +227,12 @@ def test_model():
             return True
         else:
             console.print("[yellow]⚠️  Test had issues but model may still work[/yellow]")
-            console.print(f"   Try manually: ollama run kitsu:character")
+            console.print(f"   Try manually: ollama run TinyLlama/TinyLlama-1.1B-Chat-v1.0")
             return True  # Return True anyway since model loaded
             
     except subprocess.TimeoutExpired:
         console.print("[yellow]⚠️  Test timed out (model may still be loading)[/yellow]")
-        console.print("   Model is installed, try: [yellow]ollama run kitsu:character[/yellow]")
+        console.print("   Model is installed, try: [yellow]ollama run TinyLlama/TinyLlama-1.1B-Chat-v1.0[/yellow]")
         return True  # Return True anyway since model loaded
     except Exception as e:
         console.print(f"[yellow]⚠️  Test error: {e}[/yellow]")
@@ -243,61 +253,112 @@ def update_config():
         with open(config_path, "r") as f:
             config = json.load(f)
         
-        config["model"] = "kitsu:character"
+        config["model"] = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
         
         with open(config_path, "w") as f:
             json.dump(config, f, indent=2)
         
         console.print("[green]✅ Config updated![/green]")
-        console.print("   Model: kitsu:character")
+        console.print("   Model: TinyLlama/TinyLlama-1.1B-Chat-v1.0")
         
     except Exception as e:
         console.print(f"[yellow]⚠️  Could not update config: {e}[/yellow]")
         console.print("   Update manually: data/config.json")
 
 def main():
-    """Main function"""
-    console.print("\n[bold magenta]🦊 LOAD KITSU TO OLLAMA[/bold magenta]\n")
-    
-    # Find model
-    model_dir = find_model_dir()
-    if not model_dir:
-        return False
-    
-    # Merge if needed
-    model_dir = merge_lora_if_needed(model_dir)
-    if not model_dir:
-        return False
-    
-    # Create Modelfile
-    modelfile = create_modelfile(model_dir)
-    
-    # Load to Ollama
-    if not load_to_ollama(modelfile):
-        return False
-    
-    # Test
-    if test_model():
-        # Update config
-        update_config()
-        
-        console.print("\n[green]" + "="*60 + "[/green]")
-        console.print("[bold green]✅ SETUP COMPLETE![/bold green]")
-        console.print("\n[cyan]🎯 Next steps:[/cyan]")
-        console.print("   1. Start Kitsu: [yellow]python main.py[/yellow]")
-        console.print("   2. Chat with minimal prompts!")
-        console.print("\n[dim]Note: Personality is now in the model weights,[/dim]")
-        console.print("[dim]not in prompts. Responses will be faster![/dim]")
-    
-    return True
+    """Main function with CLI support"""
+    parser = argparse.ArgumentParser(description="Load Kitsu models into Ollama")
+
+    parser.add_argument(
+        "--adapter",
+        type=str,
+        help="Specific adapter to load (e.g., 'chaotic', 'core')"
+    )
+
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing model"
+    )
+
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Check status only (don't load)"
+    )
+
+    args = parser.parse_args()
+
+    # Check status mode
+    if args.check:
+        if ollama:
+            ollama.show_status()
+        else:
+            console.print("[yellow]⚠️  scripts.ollama not available - status check skipped[/yellow]")
+        return 0
+
+    # Check Ollama available
+    if ollama and not ollama.check_ollama_available():
+        console.print("\n[red]❌ Ollama not available[/red]")
+        console.print("   Make sure Ollama is installed and running")
+        console.print("   Install from: https://ollama.ai")
+        return 1
+
+    # Get available adapters
+    if ollama:
+        adapters = ollama.list_available_adapters()
+    else:
+        # Fallback: use local find_model_dir
+        model_dir = find_model_dir()
+        adapters = [{"name": "local-model", "path": model_dir}] if model_dir else []
+
+    if not adapters:
+        console.print("\n[red]❌ No adapters found[/red]")
+        console.print("   Run training first:")
+        console.print("   [cyan]python scripts/train_pipeline.py[/cyan]")
+        return 1
+
+    # Select adapter
+    if args.adapter:
+        selected = None
+        for adapter in adapters:
+            if args.adapter.lower() in adapter["name"].lower():
+                selected = adapter
+                break
+
+        if not selected:
+            console.print(f"\n[red]❌ Adapter '{args.adapter}' not found[/red]")
+            console.print("\nAvailable:")
+            for adapter in adapters:
+                console.print(f"   - {adapter['name']}")
+            return 1
+    else:
+        selected = adapters[0]
+        console.print(f"[cyan]Using latest adapter: {selected['name']}[/cyan]")
+
+    # Load model (delegated or local)
+    if ollama:
+        success = ollama.load_model(selected["path"], force=args.force)
+    else:
+        # Fallback to local flow
+        model_dir = selected["path"]
+        model_dir = merge_lora_if_needed(model_dir)
+        if not model_dir:
+            return 1
+        modelfile = create_modelfile(model_dir)
+        success = load_to_ollama(modelfile)
+        if success:
+            test_model()
+            update_config()
+
+    return 0 if success else 1
 
 if __name__ == "__main__":
     try:
-        success = main()
-        sys.exit(0 if success else 1)
+        sys.exit(main())
     except KeyboardInterrupt:
-        console.print("\n\n[yellow]⚠️  Cancelled by user[/yellow]")
-        sys.exit(0)
+        console.print("\n\n[yellow]⚠️  Interrupted[/yellow]")
+        sys.exit(130)
     except Exception as e:
         console.print(f"\n[red]❌ Error: {e}[/red]")
         import traceback

@@ -80,7 +80,7 @@ class KitsuIntegrated:
             memory_config = MemoryConfig(
                 max_history=200,
                 auto_save=True,
-                save_interval=300,  # 5 minutes
+                save_interval=10,  #
                 compression_enabled=True
             )
             
@@ -89,6 +89,13 @@ class KitsuIntegrated:
                 memory_path=Path("data/memory/memory.json"),
                 config=memory_config
             )
+            # Ensure user profile exists and is repaired if necessary
+            try:
+                self.memory.ensure_user_profile_exists()
+                log.info("✅ User profile presence validated/repaired")
+            except Exception as e:
+                log.warning(f"Failed to validate user profile: {e}")
+
             log.info("✅ Memory system initialized (with plugins)")
             
         except Exception as e:
@@ -214,12 +221,18 @@ class KitsuIntegrated:
             
             # Custom admin check using memory system
             def admin_check(user_id: str) -> bool:
-                """Check if user is admin using memory system."""
+                """Check if user is admin using memory system.
+
+                The stored user permissions use the key `is_admin` (not `admin`), so
+                check for both to be robust and also allow `dev_console` role.
+                """
                 try:
                     user_info = self.memory.get_user_info()
                     # Check permissions in user profile
                     perms = user_info.get("permissions", {})
-                    return perms.get("admin", False) or perms.get("dev_console", False)
+                    return bool(
+                        perms.get("is_admin") or perms.get("admin") or perms.get("dev_console")
+                    )
                 except Exception:
                     # Fallback to hardcoded list
                     return user_id in ["Zino", "Natadaide"]
@@ -363,29 +376,41 @@ class KitsuIntegrated:
             mood = state["mood"]
             style = state["style"]
             
-            # --- Build prompt ---
-            if getattr(self.llm, "prompt_builder", None):
-                greeting_prompt = (
-                    self.llm.prompt_builder
-                    ._build_greeting_prompt(title, mood, style)
+            # --- Build prompt / Generate greeting ---
+            # For character models, use minimal machine-readable control header instead of a full natural-language prompt
+            if getattr(self.llm, "is_character_model", False):
+                # Let LLMInterface assemble a concise control header for greeting
+                greeting = await self.llm.generate_response(
+                    user_input="",
+                    mood=mood,
+                    style=style,
+                    stream=False,
+                    is_greeting=True,
+                    user_title=title
                 )
             else:
-                # fallback: create PromptBuilder manually
-                from core.llm.prompt_builder import PromptBuilder
-                pb = PromptBuilder(
-                    character_context=self.character_context,
-                    memory_manager=self.memory
-                )
-                greeting_prompt = pb._build_greeting_prompt(title, mood, style)
+                # Standard models: build natural-language greeting prompt
+                if getattr(self.llm, "prompt_builder", None):
+                    greeting_prompt = (
+                        self.llm.prompt_builder._build_greeting_prompt(title, mood, style)
+                    )
+                else:
+                    from core.llm.prompt_builder import PromptBuilder
+                    pb = PromptBuilder(
+                        character_context=self.character_context,
+                        memory_manager=self.memory
+                    )
+                    greeting_prompt = pb._build_greeting_prompt(title, mood, style)
 
-            # --- Generate greeting ---
-            greeting = await self.llm.generate_response(
-                user_input="",
-                mood=mood,
-                style=style,
-                stream=False,
-                custom_prompt=greeting_prompt
-            )
+                greeting = await self.llm.generate_response(
+                    user_input="",
+                    mood=mood,
+                    style=style,
+                    stream=False,
+                    custom_prompt=greeting_prompt,
+                    is_greeting=True,
+                    user_title=title
+                )
 
             console.print(f"[magenta]Kitsu:[/magenta] {greeting}\n")
 
@@ -497,10 +522,48 @@ class KitsuIntegrated:
             return
         
         elif cmd == "/llm":
-            is_available = self.llm._check_availability() if hasattr(self.llm, '_check_availability') else True
-            console.print(f"🤖 LLM Status: {'✅ Available' if is_available else '❌ Unavailable'}")
+            # /llm                -> show detailed status
+            # /llm set <model>    -> change model at runtime
+            # /llm reload         -> re-check availability
+            if len(parts) == 1:
+                is_available = self.llm._check_availability() if hasattr(self.llm, '_check_availability') else True
+                console.print(f"🤖 LLM Status: {'✅ Available' if is_available else '❌ Unavailable'}")
+                try:
+                    print(f"Model: {self.llm.model}")
+                    print(f"Type: {'CHARACTER' if getattr(self.llm, 'is_character_model', False) else 'STANDARD'}")
+                    print(f"Temperature: {getattr(self.llm, 'temperature', 'n/a')}")
+                    print(f"Available LoRA: {', '.join(self.llm.lora_manager.get_stats().get('available_styles', [])) if getattr(self.llm, 'lora_manager', None) else 'none'}")
+                    print(f"Current LoRA stack: {getattr(self.llm.lora_manager, 'current_stack', []) if getattr(self.llm, 'lora_manager', None) else '[]'}")
+                except Exception:
+                    pass
+                return
+
+            sub = parts[1].lower()
+            if sub == 'set' and len(parts) >= 3:
+                new_model = parts[2]
+                ok = False
+                try:
+                    ok = self.llm.set_model(new_model)
+                except Exception as e:
+                    print(f"❌ Failed to set model: {e}")
+                if ok:
+                    print(f"✅ Model changed to: {new_model}")
+                else:
+                    print(f"❌ Failed to change model to: {new_model}")
+                return
+
+            if sub in ('reload', 'refresh'):
+                self.llm._check_availability()
+                print("🔄 Availability refreshed")
+                return
+
+            print("Usage: /llm | /llm set <model> | /llm reload")
             return
-        
+
+        elif cmd == "/model":
+            await self._handle_model_command()
+            return
+
         # SEARCH COMMAND
         # ============================================================
         
@@ -612,16 +675,109 @@ class KitsuIntegrated:
             return
         
         elif cmd == "/trigger":
+            # /trigger -h          -> list available triggers
+            # /trigger -add NAME    -> interactively add a trigger
+            # /trigger <name>       -> fire an existing trigger
             if len(parts) < 2:
-                print("❌ Usage: /trigger <trigger_name>")
+                print("❌ Usage: /trigger <trigger_name> | /trigger -h | /trigger -add <name>")
                 return
-            
+
+            sub = parts[1].lower()
+
+            if sub in ("-h", "--help"):
+                if not getattr(self, 'emotion_engine', None) or not getattr(self.emotion_engine, 'trigger_manager', None):
+                    print("⚠️ No trigger manager available")
+                    return
+                trigs = self.emotion_engine.trigger_manager.list_triggers()
+                print("\n📌 Available triggers:")
+                for name, info in trigs.items():
+                    cd = info.get('cooldown', 0.0)
+                    emos = info.get('emotions', [])
+                    emo_summary = ", ".join([f"{e.get('name')}({e.get('intensity')},{e.get('duration')})" for e in emos])
+                    print(f"  - {name}: cooldown={cd}, emotions=[{emo_summary}]")
+                return
+
+            if sub in ("-add", "--add"):
+                # attempt to parse JSON blob after -add
+                payload = None
+                if len(parts) >= 3:
+                    raw = " ".join(parts[2:]).strip()
+                    # try JSON
+                    try:
+                        import json as _json
+                        payload = _json.loads(raw)
+                        name = payload.get('name') or payload.get('trigger') or None
+                    except Exception:
+                        name = parts[2]
+                else:
+                    name = input("Trigger name: ").strip()
+
+                if not name:
+                    print("❌ Trigger name required")
+                    return
+
+                # If payload dict provided, use it; otherwise interactively ask for fields
+                if isinstance(payload, dict):
+                    trigger_def = payload
+                else:
+                    try:
+                        cooldown_raw = input("Cooldown seconds (default 5.0): ").strip()
+                        cooldown = float(cooldown_raw) if cooldown_raw else 5.0
+                    except Exception:
+                        cooldown = 5.0
+
+                    emotions = []
+                    print("Enter emotions (leave name blank to finish):")
+                    while True:
+                        ename = input("  emotion name: ").strip()
+                        if not ename:
+                            break
+                        try:
+                            intensity_raw = input("    intensity [0.0-1.0] (default 0.5): ").strip()
+                            intensity = float(intensity_raw) if intensity_raw else 0.5
+                        except Exception:
+                            intensity = 0.5
+                        try:
+                            duration_raw = input("    duration seconds (default 10.0): ").strip()
+                            duration = float(duration_raw) if duration_raw else 10.0
+                        except Exception:
+                            duration = 10.0
+                        emotions.append({"name": ename, "intensity": intensity, "duration": duration})
+
+                    modifiers = {}
+                    mod_raw = input("Modifiers (key:val,comma-separated; default none): ").strip()
+                    if mod_raw:
+                        pairs = [p.strip() for p in mod_raw.split(",") if p.strip()]
+                        for p in pairs:
+                            if ':' in p:
+                                k, v = p.split(':', 1)
+                                try:
+                                    modifiers[k.strip()] = float(v.strip())
+                                except Exception:
+                                    pass
+
+                    trigger_def = {"cooldown": cooldown, "emotions": emotions, "modifiers": modifiers}
+
+                try:
+                    ok = self.emotion_engine.trigger_manager.add_trigger(name, trigger_def)
+                    if ok:
+                        print(f"✅ Trigger '{name}' added/updated")
+                    else:
+                        print(f"❌ Failed to add trigger '{name}'")
+                except Exception as e:
+                    print(f"❌ Error adding trigger: {e}")
+                return
+
+            # otherwise treat as firing an existing trigger
             trigger_name = parts[1]
             print(f"🔥 Firing trigger: {trigger_name}")
-            self.emotion_engine.fire_trigger(trigger_name)
-            await self.emotion_engine.tick()
-            state = self.emotion_engine.get_state_dict()
-            print(f"State: {state['mood']}/{state['style']} ({state['dominant_emotion']})")
+            try:
+                self.emotion_engine.fire_trigger(trigger_name)
+                await self.emotion_engine.tick()
+                state = self.emotion_engine.get_state_dict()
+                print(f"State: {state['mood']}/{state['style']} ({state['dominant_emotion']})")
+            except Exception as e:
+                print(f"❌ Trigger failed: {e}")
             return
         
         elif cmd == "/hide":
@@ -648,7 +804,7 @@ class KitsuIntegrated:
                 # Show status
                 stats = self.llm.lora_manager.get_stats()
                 print(f"\n📊 LoRA Status:")
-                print(f"  Current style: {stats['current_style']}")
+                print(f"  Current style: {stats['current_stack']}")
                 print(f"  Current adapter: {stats['current_adapter']}")
                 print(f"  Total switches: {stats['switch_count']}")
                 print(f"  Available: {', '.join(stats['available_styles'])}")
@@ -688,7 +844,12 @@ class KitsuIntegrated:
         # ============================================================
         
         elif cmd in ["/train", "/rate", "/errors", "/debug", "/simulate_error", 
-                    "/export_logs", "/reset_module", "/dev_stats"]:
+                    "/export_logs", "/reset_module", "/dev_stats", "/auto_train",
+                    "/show_pre_prompt", "/show_prompt", "/last_prompt",  
+                    "/prompt_breakdown", "/breakdown",                   
+                    "/model_config", "/show_model",                      
+                    "/compare_modes", "/compare_prompts",                
+                    "/export_prompts", "/save_prompts"]:                 
             
             if not self.dev_router:
                 print("❌ Dev console not initialized or not available.")
@@ -792,6 +953,29 @@ class KitsuIntegrated:
         # stray /first_meet block removed (handled earlier)
 
 
+    async def _handle_model_command(self):
+        """Handle /model command to show current model info."""
+        try:
+            if not self.llm:
+                print("❌ LLM interface not available")
+                return
+            
+            # 🎯 ACCESS THE DETECTION RESULT
+            model_name = self.llm.model
+            is_character = self.llm.is_character_model  # ← READ HERE
+            temp = self.llm.temperature
+            available = self.llm.is_available
+            
+            # Print info
+            print(f"\n📦 Model: {model_name}")
+            print(f"Available: {'Yes' if available else 'No'}")
+            print(f"🎭 Type: {'CHARACTER' if is_character else 'STANDARD'}")
+            print(f"🌡️ Temperature: {temp}")
+        except Exception as e:
+            print(f"❌ Failed to get model info: {e}")
+
+    # user command
+    #------------------
     async def _handle_user_command(self, parts: List[str], full_command: str):
         """Handle /user subcommands (extracted for clarity)."""
         
@@ -929,12 +1113,13 @@ class KitsuIntegrated:
         print("\n📊 Information:")
         print("  /stats             - Show memory statistics")
         print("  /state             - Show emotional state")
-        print("  /llm               - Show LLM status")
+        print("  /model             - Show current model info")
+        print("  /llm               - Show LLM status (use '/llm set <model>' to change model at runtime)")
         print("  /search <query>    - Search memory")
         print("\n😊 Personality:")
         print("  /mood <mode>       - Set mood (behave|mean|flirty)")
         print("  /style <style>     - Set style (chaotic|sweet|cold|silent)")
-        print("  /trigger <name>    - Fire emotion trigger")
+        print("  /trigger <name>    - Fire emotion trigger (use '/trigger -h' to list triggers, '/trigger -add <name>' to add)")
         print("  /hide              - Hide Kitsu")
         print("  /unhide            - Show Kitsu")
         print("\n👤 User:")
@@ -944,13 +1129,21 @@ class KitsuIntegrated:
         print("\n🛠️  Developer (Admin Only):")
         print("  /train <text>      - Save response override for training")
         print("  /rate <1-5>        - Rate last response")
+        print("  /auto_train [on|off] - Toggle automatic fine-tune after /train or /rate")
         print("  /errors [n]        - Show last n errors")
         print("  /debug             - Show debug summary")
         print("  /simulate_error    - Test fallback system")
         print("  /export_logs       - Export error logs")
         print("  /reset_module <name> - Hot-reload a module")
         print("  /dev_stats         - Show system statistics")
-        print("  /first_meet        - Re-run the setup wizard (interactive or non-interactive)")
+        print("  /first_meet        - Re-run the setup wizard")
+        print("\n🔍 Prompt Inspection (Admin Only):")
+        print("  /show_pre_prompt [format] - Show last prompt sent to LLM")
+        print("                              format: pretty|raw|json (default: pretty)")
+        print("  /prompt_breakdown  - Show detailed prompt structure analysis")
+        print("  /model_config      - Show current model configuration")
+        print("  /compare_modes [input] - Compare prompts across all modes/styles")
+        print("  /export_prompts    - Export prompt history to logs/")
         print("\n🔧 LoRA Management:")
         print("  /lora              - Show LoRA status")
         print("  /lora list         - List available adapters")

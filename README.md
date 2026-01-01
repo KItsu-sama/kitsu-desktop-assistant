@@ -62,7 +62,7 @@ docs/                  # Documentation and tutorials (you'll add TUTORIAL.md)
 scripts/               # Helpful utilities and pipelines
 	generate_training_data.py  # Generate training examples from templates
 	finetune_lora.py          # CPU-friendly LoRA training script
-	load_to_ollama.py         # Preferred Ollama loader
+	load_to_ollama_direct.py         # Preferred Ollama loader
 	load_to_ollama_direct.py  # Direct import fallback (no GGUF step)
 	run_pipeline.py           # Run the full generate->train->load pipeline
 	first_run.py              # Manage first-run status and reset
@@ -87,18 +87,18 @@ System architecture (high-level)
 
 Models & LoRA strategy
 ----------------------
-- Use small base models (TinyLlama/TinyLlama-1.1B) for CPU-first workflows.
+- Use small base models (TinyLlama/TinyLlama-1.1B-Chat-v1.0) for CPU-first workflows. -> kitsu:character
 - Train LoRA adapters per personality/style to keep them small and fast to train.
 - Merged models (base + LoRA) are written to `data/models/` and can be loaded into Ollama or used locally.
 
 Scripts overview
 ----------------
 - `scripts/first_run.py` — manage first-run state (status, run, reset).
-- `scripts/generate_training_data.py` — prepare JSON training examples.
+- `scripts/train_pipeline.py` — canonical unified pipeline (generate → train → load) and preferred entry point.
+- `scripts/generate_training_data.py` — (deprecated) use `scripts/train_pipeline.py --generate-only` instead.
 - `scripts/finetune_lora.py` — CPU-friendly LoRA training (writes into `data/models/`).
-- `scripts/load_to_ollama.py` — preferred path to load a model into Ollama.
-- `scripts/load_to_ollama_direct.py` — fallback importer if Ollama is not available.
-- `scripts/run_pipeline.py` — convenience runner: generate → train → load (stops on failure).
+- `scripts/load_to_ollama_direct.py` — direct loader (preferred fallback).
+- Several legacy scripts (e.g., `scripts/run_pipeline.py`, `scripts/load_to_ollama_direct.py`, `scripts/quickstart_lora.py`) are deprecated and now delegate to the new pipeline.
 
 First-time setup (high level)
 -----------------------------
@@ -112,7 +112,7 @@ Common workflows
 - Manual sequence:
 	1. `python scripts/generate_training_data.py`
 	2. `python scripts/finetune_lora.py --style chaotic`
-	3. `python scripts/load_to_ollama.py` (or direct fallback)
+	3. `python scripts/load_to_ollama_direct.py` (or direct fallback)
 	4. `python main.py`
 
 Reset / rebuild instructions

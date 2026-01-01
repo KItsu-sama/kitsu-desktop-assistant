@@ -1,4 +1,3 @@
-
 # ============================================================================
 # FILE: scripts/setup_wizard.py
 # Interactive setup wizard (first-time configuration)
@@ -213,23 +212,59 @@ class SetupWizard:
         console.print("")
     
     def _save_config(self):
-        """Save configuration files"""
+        """Save configuration files.
+
+        Merge with existing `user_profile` when present to preserve developer
+        flags, permissions, learned ratings, and LoRA state. Also set
+        `completed_setup` flag so re-running the wizard cannot unset it.
+        """
         console.print("[yellow]💾 Saving configuration...[/yellow]")
-        
+
         # Create directories
         Path("data/config").mkdir(parents=True, exist_ok=True)
         Path("data/memory").mkdir(parents=True, exist_ok=True)
         Path("data/models").mkdir(parents=True, exist_ok=True)
         Path("logs").mkdir(parents=True, exist_ok=True)
-        
+
         # Save main config
-        with open("data/config.json", "w") as f:
+        with open("data/config.json", "w", encoding='utf-8') as f:
             json.dump(self.config, f, indent=2)
-        
-        # Save user profile
-        with open("data/config/user_profile.json", "w") as f:
-            json.dump(self.user_profile, f, indent=2)
-        
+
+        # Merge user_profile with existing file if present
+        user_path = Path("data/config/user_profile.json")
+        if user_path.exists():
+            try:
+                existing = json.loads(user_path.read_text(encoding='utf-8'))
+            except Exception:
+                existing = {}
+        else:
+            existing = {}
+
+        # Preserve developer flags and permissions unless explicitly changed
+        preserved = {}
+        if existing.get("status") == "developer":
+            preserved["status"] = existing.get("status")
+        # Preserve explicit permission flags
+        preserved_permissions = existing.get("permissions", {})
+
+        merged = existing.copy()
+        merged.update(self.user_profile)
+
+        # Merge permissions conservatively: existing keys not overwritten unless set in wizard
+        merged_perms = preserved_permissions.copy()
+        merged_perms.update(self.user_profile.get("permissions", {}))
+        merged["permissions"] = merged_perms
+
+        # Ensure completed_setup flag is present and remains true once set
+        if existing.get("completed_setup"):
+            merged["completed_setup"] = True
+        else:
+            merged["completed_setup"] = True  # set on successful save
+
+        # Write merged profile
+        with open(user_path, "w", encoding='utf-8') as f:
+            json.dump(merged, f, indent=2)
+
         # Create default personality config
         personality = {
             "default_mood": self.config.get("default_mood", "behave"),
@@ -238,19 +273,18 @@ class SetupWizard:
             "emotion_threshold": 0.3,
             "max_stack_size": 5
         }
-        
-        with open("data/config/personality.json", "w") as f:
+
+        with open("data/config/personality.json", "w", encoding='utf-8') as f:
             json.dump(personality, f, indent=2)
         console.print("[green]✓ Configuration saved![/green]\n")
-        # Mark first run as complete
+        # Mark first run as complete file flag
         self._write_first_run_flag()
 
     def apply_defaults(self):
         """Apply present default configuration without any interactive prompts.
 
-        This method simply writes the current `self.config`, `self.user_profile`,
-        and a personality default file so the runtime or tests can call it and
-        the application will pick up defaults when `data/config.json` is present.
+        This method writes defaults but merges with existing user profile to
+        preserve developer permissions and other persistent flags.
         """
         # No interactive prompts; simply persist the defaults
         Path("data/config").mkdir(parents=True, exist_ok=True)
@@ -262,8 +296,25 @@ class SetupWizard:
         with open("data/config.json", "w", encoding='utf-8') as f:
             json.dump(self.config, f, indent=2)
 
-        with open("data/config/user_profile.json", "w", encoding='utf-8') as f:
-            json.dump(self.user_profile, f, indent=2)
+        # Merge with existing user profile to avoid wiping developer flags
+        user_path = Path("data/config/user_profile.json")
+        existing = {}
+        if user_path.exists():
+            try:
+                existing = json.loads(user_path.read_text(encoding='utf-8'))
+            except Exception:
+                existing = {}
+
+        merged = existing.copy()
+        merged.update(self.user_profile)
+        # Preserve existing permissions unless explicitly set
+        merged_perms = existing.get("permissions", {}).copy()
+        merged_perms.update(self.user_profile.get("permissions", {}))
+        merged["permissions"] = merged_perms
+        merged["completed_setup"] = True
+
+        with open(user_path, "w", encoding='utf-8') as f:
+            json.dump(merged, f, indent=2)
 
         personality = {
             "default_mood": self.config.get("default_mood", "behave"),
